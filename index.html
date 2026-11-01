@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HoopLab – Basketball Skill Analysis</title>
+    <meta name="description" content="Upload a basketball video, get pose-based form analysis, coaching suggestions and a skill report." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23ff7a1a'/%3E%3Cpath d='M2 16h28M16 2v28M6 6c6 5 6 15 0 20M26 6c-6 5-6 15 0 20' stroke='%23000' stroke-width='1.6' fill='none'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#analyze">Hoop<span>Lab</span></a>
+      <nav>
+        <a href="#analyze" data-view="analyze">Analyze</a>
+        <a href="#report" data-view="report">Report</a>
+        <a href="#progress" data-view="progress">Progress</a>
+      </nav>
+      <button class="btn icon ghost" id="themeBtn" aria-label="Toggle theme">◐</button>
+    </header>
+
+    <main>
+      <!-- ===================== ANALYZE ===================== -->
+      <section id="view-analyze" class="view">
+        <div class="hero">
+          <h1>Film it. Analyze it. Get better.</h1>
+          <p class="muted">Upload a clip of your jump shot or dribbling. HoopLab tracks your body in the browser, measures your form and builds a coaching report. Your video never leaves your device.</p>
+        </div>
+
+        <div class="analyze-grid">
+          <div class="card">
+            <label class="drop" id="drop">
+              <input type="file" id="file" accept="video/*" hidden />
+              <div class="drop-inner" id="dropInner">
+                <div class="drop-icon">⬆</div>
+                <b>Drop a video here or tap to choose</b>
+                <span class="muted small">MP4 / MOV / WebM · 5–60 s works best</span>
+              </div>
+              <video id="preview" class="preview" controls playsinline muted hidden></video>
+            </label>
+            <div class="trim" id="trim" hidden>
+              <label>Start <input type="number" id="tStart" min="0" step="0.1" value="0" /> s</label>
+              <label>End <input type="number" id="tEnd" min="0" step="0.1" /> s</label>
+              <button class="btn ghost small" id="useCurrent">Set start to current frame</button>
+            </div>
+
+            <div class="opts">
+              <fieldset>
+                <legend>Skill</legend>
+                <div class="seg" role="radiogroup">
+                  <label><input type="radio" name="mode" value="shooting" checked /><span>🏀 Shooting</span></label>
+                  <label><input type="radio" name="mode" value="dribbling" /><span>⛹ Dribbling</span></label>
+                </div>
+              </fieldset>
+              <label>Shooting / dribbling hand
+                <select id="hand"><option value="auto">Auto-detect</option><option value="right">Right</option><option value="left">Left</option></select>
+              </label>
+              <label>Camera angle
+                <select id="view"><option value="auto">Auto-detect</option><option value="side">Side-on</option><option value="front">Facing camera</option></select>
+              </label>
+              <label>Analysis quality
+                <select id="quality"><option value="fast">Fast</option><option value="accurate">Accurate (slower)</option></select>
+              </label>
+            </div>
+
+            <div class="actions">
+              <button class="btn primary" id="analyzeBtn" disabled>Analyze video</button>
+              <button class="btn ghost" id="cancelBtn" hidden>Cancel</button>
+            </div>
+            <div class="progress" id="progress" hidden>
+              <div class="progress-bar"><span id="progressFill"></span></div>
+              <span class="small muted" id="status">Preparing…</span>
+            </div>
+            <div class="error" id="error" hidden></div>
+          </div>
+
+          <aside class="side">
+            <div class="card">
+              <h3>No video handy?</h3>
+              <p class="muted small">Explore a full report with sample data.</p>
+              <div class="actions">
+                <button class="btn" id="demoShoot">Demo: jump shots</button>
+                <button class="btn" id="demoDribble">Demo: dribbling</button>
+              </div>
+            </div>
+            <div class="card tips">
+              <h3>Filming tips</h3>
+              <ul>
+                <li><b>Whole body in frame</b>, head to feet, for the whole clip.</li>
+                <li><b>Shooting:</b> film from the side (shooting-hand side) for angles and arc. Film facing you to check elbow alignment.</li>
+                <li><b>Dribbling:</b> film facing you, 5+ seconds of continuous dribbling.</li>
+                <li>Tripod or a steady phone at waist height, 3–6 m away.</li>
+                <li>Good lighting, one player in frame, and try to film from the same spot each time.</li>
+              </ul>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ===================== REPORT ===================== -->
+      <section id="view-report" class="view" hidden>
+        <div class="empty card" id="reportEmpty">
+          <h3>No report yet</h3>
+          <p class="muted">Analyze a video or open a demo to see your report here.</p>
+          <a class="btn primary" href="#analyze">Analyze a video</a>
+        </div>
+        <div id="reportBody" hidden>
+          <div class="report-bar">
+            <div>
+              <div class="eyebrow" id="repMode"></div>
+              <h2 id="repTitle"></h2>
+            </div>
+            <div class="tabs" role="tablist">
+              <button role="tab" class="tab active" data-tab="interactive">Interactive</button>
+              <button role="tab" class="tab" data-tab="summary">Summary report</button>
+            </div>
+            <div class="report-actions">
+              <button class="btn ghost small" id="dlHtml">Download report</button>
+              <button class="btn ghost small" id="dlJson">Export data</button>
+              <button class="btn ghost small" id="printBtn">Print / PDF</button>
+            </div>
+          </div>
+
+          <div id="tab-interactive" class="tabpanel">
+            <div class="kpis" id="kpis"></div>
+            <div class="inter-grid">
+              <div class="card player-card">
+                <div id="player"></div>
+                <div id="noPlayer" class="muted small" hidden></div>
+              </div>
+              <div class="card">
+                <div class="rep-chips" id="repChips"></div>
+                <div class="metric-cards" id="metricCards"></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="chart-head">
+                <h3>Movement timeline</h3>
+                <div class="legend small muted" id="eventLegend"></div>
+              </div>
+              <div class="chart-wrap"><canvas id="timeline"></canvas></div>
+              <p class="small muted">Click anywhere on the chart to jump the video to that moment.</p>
+            </div>
+          </div>
+          <div id="tab-summary" class="tabpanel" hidden></div>
+        </div>
+      </section>
+
+      <!-- ===================== PROGRESS ===================== -->
+      <section id="view-progress" class="view" hidden>
+        <div class="card">
+          <div class="chart-head">
+            <h3>Score over time</h3>
+            <button class="btn ghost small" id="clearHistory">Clear history</button>
+          </div>
+          <div class="chart-wrap short"><canvas id="progressChart"></canvas></div>
+          <p class="muted small" id="progressEmpty" hidden>Analyze a few sessions to see your progress here.</p>
+        </div>
+        <div class="card">
+          <h3>Sessions</h3>
+          <div id="sessionList" class="session-list"></div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>

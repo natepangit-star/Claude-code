@@ -1,0 +1,30 @@
+{
+  "name": "hooplab",
+  "version": "0.1.0",
+  "description": "Basketball skill analysis: upload a video, get pose-based form analysis, coaching suggestions and reports.",
+  "scripts": {
+    "predev": "node scripts/copy-wasm.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/copy-wasm.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/natepangit-star/Claude-code.git"
+  },
+  "bugs": {
+    "url": "https://github.com/natepangit-star/Claude-code/issues"
+  },
+  "homepage": "https://github.com/natepangit-star/Claude-code#readme",
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.14",
+    "chart.js": "^4.4.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.10"
+  },
+  "private": true,
+  "type": "module"
+}
