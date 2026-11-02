@@ -5,7 +5,7 @@
 // ratio so distances are isotropic) and v is landmark visibility (0..1).
 // Landmark indices follow the MediaPipe 33-point pose model.
 
-import { SHOT_METRICS, DRIBBLE_METRICS } from './metrics.js';
+import { SHOT_METRICS, DRIBBLE_METRICS, metricDefs, RIM_CM, DUNK_CLEARANCE_CM } from './metrics.js';
 
 export const LM = {
   NOSE: 0,
@@ -15,6 +15,8 @@ export const LM = {
   L_HIP: 23, R_HIP: 24,
   L_KN: 25, R_KN: 26,
   L_AN: 27, R_AN: 28,
+  L_HEEL: 29, R_HEEL: 30,
+  L_TOE: 31, R_TOE: 32,
 };
 
 const MIN_VIS = 0.5;
@@ -175,7 +177,7 @@ export function computeFeatures(frames, hand = 'right') {
   const raw = {
     torso: [], knee: [], elbow: [], wristRel: [], forearm: [], lean: [],
     hipX: [], hipY: [], ankleY: [], shoulderW: [], elbowOff: [], noseRel: [],
-    wristY: [], wristYOther: [], ankleW: [],
+    wristY: [], wristYOther: [], ankleW: [], kneeW: [],
   };
   for (const f of frames) {
     const lm = f.lm;
@@ -202,6 +204,8 @@ export function computeFeatures(frames, hand = 'right') {
     raw.wristY.push(wr?.y ?? null);
     raw.wristYOther.push(otherWr?.y ?? null);
     raw.ankleW.push(lan && ran ? Math.abs(lan.x - ran.x) : null);
+    const lkn = g(LM.L_KN), rkn = g(LM.R_KN);
+    raw.kneeW.push(lkn && rkn ? Math.abs(lkn.x - rkn.x) : null);
   }
   const T = median(raw.torso) || 0.25;
   const out = { T };
@@ -411,34 +415,266 @@ function analyzeDribbling(frames, view) {
   };
 }
 
+// ---------------------------------------------------------------- jump / dunk
+
+const G = 9.81;
+
+/** Jump height (cm) from flight time (s): h = g·t²/8. */
+export function heightFromFlight(t) {
+  return t > 0 ? (G * t * t * 100) / 8 : null;
+}
+
+function median3(series) {
+  return series.map((v, i) => {
+    if (v == null) return null;
+    const w = [series[i - 1], v, series[i + 1]].filter((x) => x != null).sort((a, b) => a - b);
+    return w[Math.floor(w.length / 2)];
+  });
+}
+
+/** Lowest visible foot point per frame (max y): the foot that is still on the floor. */
+function footBottom(frames) {
+  const ids = [LM.L_AN, LM.R_AN, LM.L_HEEL, LM.R_HEEL, LM.L_TOE, LM.R_TOE];
+  return frames.map((f) => {
+    if (!f.lm) return null;
+    const ys = ids.map((i) => pt(f.lm, i)?.y).filter((v) => v != null);
+    return ys.length ? Math.max(...ys) : null;
+  });
+}
+
+function analyzeJump(frames, view, opts) {
+  const times = frames.map((f) => f.t);
+  const n = times.length;
+  const dt = n > 1 ? (times[n - 1] - times[0]) / (n - 1) : 1 / 30;
+  const approach = opts.jumpType === 'approach';
+  const FR = computeFeatures(frames, 'right');
+  const FL = computeFeatures(frames, 'left');
+  const F = FR;
+  const T = F.T;
+  const warnings = [];
+  if (dt > 0.05) warnings.push('Low sample rate: jump height is less precise. Use a 30 fps (or faster) clip.');
+
+  const foot = median3(fillGaps(footBottom(frames), 2));
+  const thr = Math.max(0.012, 0.06 * T);
+  const ground0 = percentile(foot, 80);
+  if (ground0 == null) return { error: 'Your feet were not visible. Film with your whole body and the floor in frame.' };
+  const sec = (s) => Math.max(1, Math.round(s / dt));
+
+  // 1. Candidate airborne segments using a global floor line.
+  const segs = [];
+  let i = 0;
+  while (i < n) {
+    if (foot[i] == null || ground0 - foot[i] <= thr) { i++; continue; }
+    let j = i;
+    while (j + 1 < n && foot[j + 1] != null && ground0 - foot[j + 1] > thr) j++;
+    segs.push([i, j]);
+    i = j + 1;
+  }
+
+  // 2. Refine each with a local floor line and sub-frame crossing times.
+  const jumps = [];
+  for (const [a0, b0] of segs) {
+    if (a0 < 1 || b0 > n - 2) continue; // need ground contact on both sides
+    const near = [
+      ...foot.slice(Math.max(0, a0 - sec(0.6)), Math.max(0, a0 - 1)),
+      ...foot.slice(Math.min(n, b0 + sec(0.2)), Math.min(n, b0 + sec(0.7))),
+    ];
+    const g = median(near) ?? ground0;
+    const h = foot.map((v) => (v == null ? null : g - v));
+    let a = a0, b = b0;
+    while (a - 1 >= 0 && h[a - 1] != null && h[a - 1] > thr) a--;
+    while (b + 1 < n && h[b + 1] != null && h[b + 1] > thr) b++;
+    if (a < 1 || b > n - 2 || h[a - 1] == null || h[b + 1] == null) continue;
+    const cross = (i0, i1) => {
+      const u = (thr - h[i0]) / (h[i1] - h[i0]);
+      return times[i0] + Math.max(0, Math.min(1, u)) * (times[i1] - times[i0]);
+    };
+    const tTake = cross(a - 1, a);
+    const tLand = cross(b + 1, b);
+    const peakH = Math.max(...h.slice(a, b + 1).filter((v) => v != null));
+    const measured = tLand - tTake;
+    if (measured < 0.12 || peakH < 2.5 * thr) continue; // a step or noise, not a jump
+    // Crossings at `thr` happen below the floor contact; correct assuming a parabola.
+    const flight = measured / Math.sqrt(Math.max(0.25, 1 - thr / peakH));
+    if (flight > 1.1) {
+      warnings.push('Ignored a "jump" with an impossible flight time. Is the camera moving? Use a tripod.');
+      continue;
+    }
+    jumps.push({ a, b, g, h, tTake, tLand, flight, peakH });
+  }
+  if (!jumps.length) {
+    return { error: 'No jump detected. Keep the camera still (tripod), and keep your feet and the floor in frame for the whole jump.' };
+  }
+
+  // Scale (cm per unit) from the athlete's height, if given.
+  let cmPerUnit = null;
+  if (opts.heightCm > 0) {
+    const noseY = frames.map((f) => pt(f.lm, LM.NOSE)?.y ?? null);
+    const stand = [];
+    for (let k = 0; k < n; k++) {
+      if (foot[k] == null || noseY[k] == null || F.knee[k] == null) continue;
+      if (ground0 - foot[k] < thr && F.knee[k] > 160 && (F.lean[k] ?? 0) < 15) stand.push(foot[k] - noseY[k]);
+    }
+    const s = percentile(stand, 75);
+    // The nose sits at ~92.5% of standing height.
+    if (s) cmPerUnit = (opts.heightCm * 0.925) / s;
+    else warnings.push('Could not find a frame of you standing upright, so cm-based cross-checks are skipped.');
+  }
+
+  const armH = FR.wristH.map((r, k) => {
+    const l = FL.wristH[k];
+    return r == null ? l : l == null ? r : Math.max(r, l);
+  });
+
+  const reps = jumps.map((jp, k) => {
+    const take = indexAt(times, jp.tTake) <= jp.a - 1 ? jp.a - 1 : indexAt(times, jp.tTake);
+    const land = jp.b + 1;
+    const prevEnd = k > 0 ? jumps[k - 1].b + 1 : 0;
+    const winStart = Math.max(prevEnd, take - sec(approach ? 0.6 : 1.0));
+    let bottom = argBy(F.hipY, winStart, take, (x, y) => x > y);
+    if (bottom < 0) bottom = Math.max(0, take - 1);
+    let peak = argBy(F.hipY, jp.a, jp.b, (x, y) => x < y);
+    if (peak < 0) peak = Math.round((jp.a + jp.b) / 2);
+    const nextStart = k < jumps.length - 1 ? jumps[k + 1].a - 1 : n - 1;
+    const absorbEnd = Math.min(nextStart, land + sec(0.45), n - 1);
+    let absorb = argBy(F.hipY, land, absorbEnd, (x, y) => x > y);
+    if (absorb < 0) absorb = land;
+    const ext = argBy(F.knee, Math.max(0, take - sec(0.1)), take, (x, y) => x > y);
+    let armPk = -1;
+    for (let q = Math.max(0, take - sec(0.1)); q <= Math.min(jp.b, take + sec(0.2)); q++) {
+      if (armH[q] != null && (armPk < 0 || armH[q] > armH[armPk])) armPk = q;
+    }
+    const height = heightFromFlight(jp.flight);
+    const appA = indexAt(times, times[take] - 0.5), appB = indexAt(times, times[take] - 0.1);
+
+    const values = {
+      jumpHeight: height,
+      flightTime: jp.flight,
+      hipRise: cmPerUnit && F.hipY[take] != null && F.hipY[peak] != null ? Math.max(0, (F.hipY[take] - F.hipY[peak]) * cmPerUnit) : null,
+      approachSpeed: approach && cmPerUnit && F.hipX[appA] != null && F.hipX[appB] != null && appB > appA
+        ? (Math.abs(F.hipX[appB] - F.hipX[appA]) * cmPerUnit) / 100 / (times[appB] - times[appA]) : null,
+      loadDepth: F.knee[bottom],
+      hipHinge: F.lean[bottom],
+      transition: times[take] - times[bottom],
+      armDrive: armPk >= 0 ? armH[armPk] : null,
+      takeoffExtension: ext >= 0 ? F.knee[ext] : null,
+      landingFlex: argBy(F.knee, land, absorbEnd, (x, y) => x < y) >= 0 ? F.knee[argBy(F.knee, land, absorbEnd, (x, y) => x < y)] : null,
+      kneeValgus: F.kneeW[absorb] != null && F.ankleW[absorb] ? F.kneeW[absorb] / F.ankleW[absorb] : null,
+    };
+    const { metrics, score } = scoreMetrics(values, metricDefs('jump', opts.jumpType), view);
+    const ev = (type, idx, label, t = times[idx]) => ({ type, label, idx, t });
+    return {
+      id: k + 1,
+      label: `Jump ${k + 1}`,
+      t0: times[winStart],
+      t1: times[absorbEnd],
+      events: [
+        ev('bottom', bottom, 'Bottom of dip'),
+        ev('takeoff', take, 'Take-off', jp.tTake),
+        ev('peak', peak, 'Peak'),
+        ev('landing', land, 'Landing', jp.tLand),
+        ev('absorb', absorb, 'Landing absorb'),
+      ],
+      metricEvent: {
+        loadDepth: 'bottom', hipHinge: 'bottom', transition: 'takeoff', armDrive: 'takeoff', takeoffExtension: 'takeoff',
+        jumpHeight: 'peak', flightTime: 'peak', hipRise: 'peak', approachSpeed: 'takeoff', landingFlex: 'absorb', kneeValgus: 'absorb',
+      },
+      metrics,
+      score,
+      height,
+    };
+  });
+
+  // Feet height above the (global) floor and arm height, in torso units.
+  const feet = foot.map((v) => (v == null ? null : Math.max(-0.2, (ground0 - v) / T)));
+  return {
+    reps,
+    hand: 'both',
+    cmPerUnit,
+    series: { t: times, knee: F.knee, feet, arms: armH },
+    chartSeries: [
+      { key: 'knee', label: 'Knee angle', unit: '°', axis: 'deg', hidden: view === 'front' },
+      { key: 'feet', label: 'Feet off floor (torso)', unit: '', axis: 'rel' },
+      { key: 'arms', label: 'Hand height (torso)', unit: '', axis: 'rel' },
+    ],
+    warnings: [...new Set(warnings)],
+    consistencyKeys: { jumpHeight: 10, loadDepth: 20, transition: 0.2, armDrive: 0.6 },
+  };
+}
+
+function jumpPerformance(reps, opts) {
+  const heights = reps.map((r) => r.height).filter((h) => h != null);
+  if (!heights.length) return null;
+  const best = Math.max(...heights);
+  const bestRep = reps.find((r) => r.height === best);
+  const heightCm = opts.heightCm > 0 ? opts.heightCm : null;
+  const reachGiven = opts.reachCm > 0 ? opts.reachCm : null;
+  // Standing reach is about 1.33 × height for most players.
+  const reach = reachGiven ?? (heightCm ? Math.round(heightCm * 1.33) : null);
+  const maxTouch = reach != null ? reach + best : null;
+  return {
+    best,
+    avg: mean(heights),
+    bestLabel: bestRep?.label,
+    bestFlight: bestRep?.metrics.flightTime?.value ?? null,
+    jumpType: opts.jumpType === 'approach' ? 'approach' : 'standing',
+    heightCm,
+    reach,
+    reachEstimated: reachGiven == null && reach != null,
+    maxTouch,
+    rim: RIM_CM,
+    dunkTarget: RIM_CM + DUNK_CLEARANCE_CM,
+    toRim: maxTouch != null ? RIM_CM - maxTouch : null,
+    toDunk: maxTouch != null ? RIM_CM + DUNK_CLEARANCE_CM - maxTouch : null,
+  };
+}
+
 // ---------------------------------------------------------------- session
 
+const PLAN = {
+  shooting: {
+    warm: 'Warm-up: 25 one-hand form shots within 2 m of the rim',
+    finish: 'Finish: 20 game-speed shots from your favourite spots, track makes',
+    keep: 'Maintenance: 5 spots × 10 shots, chart your makes',
+    rest: 'Recovery: light shooting + mobility, then re-record a clip to track progress',
+  },
+  dribbling: {
+    warm: 'Warm-up: 2 min stationary pound dribbles, each hand',
+    finish: 'Finish: 3 × full-court dribble at game speed, eyes up',
+    keep: 'Maintenance: 5 min combo moves (crossover, between-the-legs, behind-the-back)',
+    rest: 'Recovery: light ball-handling + mobility, then re-record a clip to track progress',
+  },
+  jump: {
+    warm: 'Warm-up: 5 min dynamic mobility (leg swings, lunges, skips) + 2 × 10 pogo hops',
+    finish: 'Finish: 3 × 3 max-effort jumps with full rest (60–90 s). Film the last set to track your height',
+    keep: 'Plyometrics: 3 × 5 box jumps + 3 × 5 depth jumps from a 30 cm box',
+    strength: 'Strength: 4 × 5 back squat or trap-bar deadlift (heavy, fast up) + 3 × 12 single-leg calf raises',
+    rest: 'Rest day: no jumping. Mobility (hips, ankles) and light core work. Jump gains happen during recovery',
+  },
+};
+
 function buildPlan(focus, mode) {
-  const warm = mode === 'shooting'
-    ? 'Warm-up: 25 one-hand form shots within 2 m of the rim'
-    : 'Warm-up: 2 min stationary pound dribbles, each hand';
-  const finish = mode === 'shooting'
-    ? 'Finish: 20 game-speed shots from your favourite spots, track makes'
-    : 'Finish: 3 × full-court dribble at game speed, eyes up';
+  const P = PLAN[mode];
   const drills = focus.map((f) => f.drill);
-  if (!drills.length) {
-    drills.push(mode === 'shooting'
-      ? 'Maintenance: 5 spots × 10 shots, chart your makes'
-      : 'Maintenance: 5 min combo moves (crossover, between-the-legs, behind-the-back)');
-  }
+  if (!drills.length) drills.push(P.keep);
   const days = ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5'];
-  return days.map((d, i) => ({
-    day: d,
-    items: i === 2
-      ? ['Recovery: light shooting/handling + mobility, then re-record a clip to track progress']
-      : [warm, drills[i % drills.length], drills[(i + 1) % drills.length] !== drills[i % drills.length] ? drills[(i + 1) % drills.length] : null, finish].filter(Boolean),
-  }));
+  return days.map((d, i) => {
+    if (i === 2) return { day: d, items: [P.rest] };
+    const a = drills[i % drills.length];
+    const b = drills[(i + 1) % drills.length];
+    const items = [P.warm, a, mode !== 'jump' && b !== a ? b : null];
+    // Jump training: alternate technique days with strength days.
+    if (mode === 'jump') items.push(i % 2 === 0 ? P.strength : P.keep);
+    items.push(P.finish);
+    return { day: d, items: items.filter(Boolean) };
+  });
 }
 
 /**
  * Analyse a session.
  * @param {Array<{t:number, lm:Array|null}>} frames
- * @param {{mode?: 'shooting'|'dribbling', hand?: 'auto'|'left'|'right', view?: 'auto'|'side'|'front'}} opts
+ * @param {{mode?: 'shooting'|'dribbling'|'jump', hand?: 'auto'|'left'|'right', view?: 'auto'|'side'|'front',
+ *   jumpType?: 'standing'|'approach', heightCm?: number, reachCm?: number}} opts
  */
 export function analyzeSession(frames, opts = {}) {
   const mode = opts.mode || 'shooting';
@@ -448,9 +684,12 @@ export function analyzeSession(frames, opts = {}) {
   }
   const view = opts.view && opts.view !== 'auto' ? opts.view : detectView(valid);
   const hand = opts.hand && opts.hand !== 'auto' ? opts.hand : detectShootingHand(valid);
-  const defs = mode === 'shooting' ? SHOT_METRICS : DRIBBLE_METRICS;
+  const jumpType = mode === 'jump' ? (opts.jumpType === 'approach' ? 'approach' : 'standing') : undefined;
+  const defs = metricDefs(mode, jumpType);
 
-  const res = mode === 'shooting' ? analyzeShooting(frames, view, hand) : analyzeDribbling(frames, view);
+  const res = mode === 'shooting' ? analyzeShooting(frames, view, hand)
+    : mode === 'jump' ? analyzeJump(frames, view, { ...opts, jumpType })
+      : analyzeDribbling(frames, view);
   if (res.error) return { error: res.error };
 
   const warnings = [...res.warnings];
@@ -487,7 +726,8 @@ export function analyzeSession(frames, opts = {}) {
 
   const repScores = res.reps.map((r) => r.score).filter((s) => s != null);
   const formScore = repScores.length ? mean(repScores) : null;
-  const overall = formScore == null ? null : Math.round(consistency == null ? formScore : 0.8 * formScore + 0.2 * consistency);
+  // Jump heights vary naturally between max efforts, so the jump grade is technique only.
+  const overall = formScore == null ? null : Math.round(consistency == null || mode === 'jump' ? formScore : 0.8 * formScore + 0.2 * consistency);
 
   // Coaching: strengths and focus areas.
   const strengths = [];
@@ -512,9 +752,16 @@ export function analyzeSession(frames, opts = {}) {
       label: 'Shot-to-shot consistency',
       score: consistency,
       issue: 'Inconsistent mechanics',
-      tip: 'Your form changes noticeably from shot to shot. Groove one repeatable motion before adding range or speed.',
-      drill: 'Same-spot reps: 50 shots from one spot at 70% speed, filming every 10th shot.',
-      why: 'Repeatable mechanics are what turn practice makes into game makes.',
+      ...(mode === 'jump' ? {
+        label: 'Jump-to-jump consistency',
+        tip: 'Your jumps vary a lot in height or technique. Rest fully (60–90 s) between max jumps and use the same approach every time.',
+        drill: 'Quality-over-quantity sets: 4 × 3 max jumps with full rest, stop the set when height drops off.',
+        why: 'Repeatable technique lets you measure progress and makes your best jump show up in games.',
+      } : {
+        tip: 'Your form changes noticeably from shot to shot. Groove one repeatable motion before adding range or speed.',
+        drill: 'Same-spot reps: 50 shots from one spot at 70% speed, filming every 10th shot.',
+        why: 'Repeatable mechanics are what turn practice makes into game makes.',
+      }),
       priority: (100 - consistency) * 0.9,
     });
     focus.sort((a, b) => b.priority - a.priority);
@@ -523,6 +770,7 @@ export function analyzeSession(frames, opts = {}) {
   return {
     version: 1,
     mode,
+    jumpType,
     view,
     hand: res.hand || hand,
     createdAt: new Date().toISOString(),
@@ -541,7 +789,9 @@ export function analyzeSession(frames, opts = {}) {
       strengths: strengths.sort((a, b) => b.score - a.score),
       focus: focus.slice(0, 4),
       plan: buildPlan(focus.slice(0, 3), mode),
+      performance: mode === 'jump' ? jumpPerformance(res.reps, { ...opts, jumpType }) : null,
     },
+    athlete: mode === 'jump' ? { heightCm: opts.heightCm || null, reachCm: opts.reachCm || null } : null,
     warnings,
   };
 }

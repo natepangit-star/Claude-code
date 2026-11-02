@@ -309,7 +309,206 @@ export const DRIBBLE_METRICS = {
   },
 };
 
+// ---------------------------------------------------------------- jump / dunk
+
+let UNITS = 'cm';
+export function setUnits(u) { UNITS = u === 'in' ? 'in' : 'cm'; }
+export function getUnits() { return UNITS; }
+/** Format a length given in centimetres in the user's preferred units. */
+export function formatLen(cm, { sign = false, decimals } = {}) {
+  if (cm == null || Number.isNaN(cm)) return '—';
+  const v = UNITS === 'in' ? cm / 2.54 : cm;
+  const d = decimals ?? (UNITS === 'in' ? 1 : 0);
+  const s = sign && v > 0 ? '+' : '';
+  return `${s}${v.toFixed(d)} ${UNITS}`;
+}
+
+export const RIM_CM = 305;
+/** Hand height above the rim generally needed to dunk a ball comfortably. */
+export const DUNK_CLEARANCE_CM = 15;
+
+export const JUMP_METRICS = {
+  jumpHeight: {
+    label: 'Jump height',
+    unit: 'cm',
+    decimals: 0,
+    ideal: null,
+    weight: 0,
+    views: ['side', 'front'],
+    format: (v) => formatLen(v),
+    why: 'Estimated from flight time (time between take-off and landing), which needs no calibration.',
+  },
+  flightTime: {
+    label: 'Flight time',
+    unit: 's',
+    decimals: 3,
+    ideal: null,
+    weight: 0,
+    views: ['side', 'front'],
+    why: 'Time in the air. Every extra 0.05 s is roughly 4–7 cm of jump.',
+  },
+  hipRise: {
+    label: 'Hip rise (cross-check)',
+    unit: 'cm',
+    decimals: 0,
+    ideal: null,
+    weight: 0,
+    views: ['side', 'front'],
+    format: (v) => formatLen(v),
+    why: 'How far your hips rise after take-off, scaled with your height. A second estimate of jump height.',
+  },
+  approachSpeed: {
+    label: 'Approach speed',
+    unit: ' m/s',
+    decimals: 1,
+    ideal: null,
+    weight: 0,
+    views: ['side'],
+    why: 'Horizontal speed going into the last steps. A faster approach you can still control converts into more height.',
+  },
+  loadDepth: {
+    label: 'Knee bend at bottom',
+    unit: '°',
+    decimals: 0,
+    ideal: [90, 125],
+    idealApproach: [105, 145],
+    tol: 30,
+    weight: 1.1,
+    views: ['side'],
+    why: 'The dip (countermovement) stores elastic energy. Too shallow leaves power unused; too deep is slow to reverse.',
+    low: {
+      issue: 'Sinking too deep',
+      tip: 'You drop very low before jumping, so it takes too long to reverse and you lose the stretch reflex. Dip a little less and reverse faster.',
+      drill: 'Quarter-to-half squat jumps: 4 × 5, dip only to about a 110° knee bend and explode straight up.',
+    },
+    high: {
+      issue: 'Dip too shallow',
+      tip: 'Your legs barely bend before take-off, so you are not loading the hips and quads. Sit into a deeper, faster dip.',
+      drill: 'Countermovement jumps to a box: 4 × 4, a fast dip to about 100–120° knee bend, land softly on the box.',
+    },
+  },
+  hipHinge: {
+    label: 'Hip hinge at bottom',
+    unit: '°',
+    decimals: 0,
+    ideal: [25, 55],
+    tol: 20,
+    weight: 0.9,
+    views: ['side'],
+    why: 'Leaning the torso forward at the bottom loads the glutes and hamstrings, your strongest jumping muscles.',
+    low: {
+      issue: 'Not using your hips',
+      tip: 'Your torso stays upright at the bottom, so the jump comes mostly from the quads. Push your hips back and let your chest come forward.',
+      drill: 'Broad jumps: 4 × 3 for max distance, plus Romanian deadlifts 3 × 8 to strengthen the hinge.',
+    },
+    high: {
+      issue: 'Folding over too much',
+      tip: 'You bend far forward at the bottom, which makes it hard to get fully upright by take-off. Keep your chest a bit prouder.',
+      drill: 'Med-ball scoop toss: 4 × 4 throws straight up from a moderate hinge, finish tall.',
+    },
+  },
+  transition: {
+    label: 'Bottom-to-take-off time',
+    unit: 's',
+    decimals: 2,
+    ideal: [0.15, 0.4],
+    idealApproach: [0.1, 0.3],
+    tol: 0.3,
+    weight: 1,
+    views: ['side', 'front'],
+    why: 'How fast you turn the dip into the jump. A quick reversal reuses the stored elastic energy.',
+    low: null,
+    high: {
+      issue: 'Slow reversal',
+      tip: 'You pause at the bottom before driving up, which wastes the stretch-shortening cycle. Think "down-UP" with no stop.',
+      drill: 'Pogo hops 3 × 15 (stiff ankles, minimal ground contact), then 3 × 5 fast countermovement jumps.',
+    },
+  },
+  armDrive: {
+    label: 'Arm drive at take-off',
+    unit: '',
+    decimals: 2,
+    ideal: [0.5, 5],
+    tol: 0.6,
+    weight: 1.1,
+    views: ['side', 'front'],
+    format: (v) => `${v.toFixed(2)} torso above shoulder`,
+    why: 'A powerful arm swing can add around 10% to jump height and gets your hands to the rim.',
+    low: {
+      issue: 'Weak arm swing',
+      tip: 'Your arms are not driving up through take-off. Swing them back as you dip, then punch them hard toward the rim as you leave the floor.',
+      drill: 'Arm-swing jumps: 4 × 5 standing jumps reaching for a target (net, backboard or a tape mark), driving both arms from behind the hips to overhead.',
+    },
+    high: null,
+  },
+  takeoffExtension: {
+    label: 'Knee extension at take-off',
+    unit: '°',
+    decimals: 0,
+    ideal: [160, 180],
+    tol: 25,
+    weight: 0.9,
+    views: ['side'],
+    why: 'Full "triple extension" (hip, knee, ankle) at take-off makes sure all your leg power goes into the jump.',
+    low: {
+      issue: 'Leaving the floor early',
+      tip: 'Your knees are still bent as you leave the ground, so you cut the push short. Finish the jump by pushing all the way through your toes.',
+      drill: 'Jump-and-reach: 4 × 5 touching a high target, freezing a full stretch at the top. Calf raises 3 × 15 too.',
+    },
+    high: null,
+  },
+  landingFlex: {
+    label: 'Landing knee bend',
+    unit: '°',
+    decimals: 0,
+    ideal: [95, 150],
+    tol: 30,
+    weight: 1,
+    views: ['side'],
+    why: 'Soft landings absorb force through the hips and knees and protect your joints, especially when you do lots of reps.',
+    low: {
+      issue: 'Collapsing on landing',
+      tip: 'You sink very deep after landing, which suggests you are not controlling the landing. Build eccentric strength.',
+      drill: 'Drop landings: step off a 30–45 cm box, stick the landing in a half squat for 2 s. 3 × 5.',
+    },
+    high: {
+      issue: 'Stiff landing',
+      tip: 'You land with fairly straight legs, which sends the impact into your knees and back. Land on the balls of your feet and bend the hips and knees.',
+      drill: 'Snap-downs and drop landings: 3 × 5, land quietly and hold the athletic position for 2 s.',
+    },
+  },
+  kneeValgus: {
+    label: 'Knee alignment on landing',
+    unit: '',
+    decimals: 2,
+    ideal: [0.85, 3],
+    tol: 0.35,
+    weight: 1.2,
+    views: ['front'],
+    format: (v) => `${Math.round(v * 100)}% of ankle width`,
+    why: 'Knees caving inward (valgus) on landing is a key ACL injury risk. Knees should track over the toes.',
+    low: {
+      issue: 'Knees caving in',
+      tip: 'Your knees move inside your feet when you land. Push your knees out over your toes, and strengthen your glutes.',
+      drill: 'Mini-band squats and lateral band walks 3 × 12, then drop landings with a band around the knees 3 × 5.',
+    },
+    high: null,
+  },
+};
+
+/** Metric definitions for a session (jump ideals depend on jump type). */
+export function metricDefs(sessionOrMode, jumpType) {
+  const mode = typeof sessionOrMode === 'string' ? sessionOrMode : sessionOrMode.mode;
+  const type = jumpType ?? (typeof sessionOrMode === 'object' ? sessionOrMode.jumpType : undefined);
+  const defs = MODES[mode].metrics;
+  if (mode !== 'jump' || type !== 'approach') return defs;
+  const out = {};
+  for (const [k, d] of Object.entries(defs)) out[k] = d.idealApproach ? { ...d, ideal: d.idealApproach } : d;
+  return out;
+}
+
 export const MODES = {
+  jump: { label: 'Jump / dunk', metrics: JUMP_METRICS },
   shooting: { label: 'Jump shot / free throw', metrics: SHOT_METRICS },
   dribbling: { label: 'Dribbling', metrics: DRIBBLE_METRICS },
 };

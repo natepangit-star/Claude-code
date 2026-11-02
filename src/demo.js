@@ -36,11 +36,11 @@ function blank() {
 const SHANK = 0.15, THIGH = 0.16, TORSO = 0.24, UARM = 0.12, FARM = 0.11;
 
 /** Side-view figure facing +x. Angles in degrees. */
-function sidePose({ cx, knee, hipFlex = 0, lean, shoulder, elbow, lift, offShoulder, offElbow }, noise) {
+function sidePose({ cx, knee, hipFlex = 0, lean, shoulder, elbow, lift, offShoulder, offElbow, raise = 0 }, noise) {
   const lm = blank();
   const set = (i, p, v = 0.95) => { lm[i] = { x: p.x + noise() * 0.004, y: p.y + noise() * 0.004, v }; };
   const a = rad((180 - knee) / 2);
-  const ankle = { x: cx, y: 0.88 - lift };
+  const ankle = { x: cx, y: 0.88 - lift - 0.025 * raise }; // heel raise pivots about the toes
   const kneeP = { x: ankle.x + SHANK * Math.sin(a), y: ankle.y - SHANK * Math.cos(a) };
   const hip = { x: kneeP.x - THIGH * Math.sin(a + rad(hipFlex)), y: kneeP.y - THIGH * Math.cos(a + rad(hipFlex)) };
   const b = rad(lean);
@@ -63,6 +63,10 @@ function sidePose({ cx, knee, hipFlex = 0, lean, shoulder, elbow, lift, offShoul
   set(LM.R_HIP, hip); set(LM.L_HIP, { x: hip.x - depth, y: hip.y }, 0.75);
   set(LM.R_KN, kneeP); set(LM.L_KN, { x: kneeP.x - depth, y: kneeP.y }, 0.75);
   set(LM.R_AN, ankle); set(LM.L_AN, { x: ankle.x - depth, y: ankle.y }, 0.75);
+  const toe = { x: cx + 0.05, y: 0.905 - lift };
+  const heel = { x: cx - 0.02, y: 0.905 - lift - 0.035 * raise };
+  set(LM.R_TOE, toe); set(LM.L_TOE, { x: toe.x - depth, y: toe.y }, 0.7);
+  set(LM.R_HEEL, heel); set(LM.L_HEEL, { x: heel.x - depth, y: heel.y }, 0.7);
   return lm;
 }
 
@@ -147,4 +151,54 @@ export function demoDribbling({ fps = 30, seconds = 8, seed = 3 } = {}) {
     frames.push({ t, lm });
   }
   return { frames, aspect: 1, mode: 'dribbling', label: 'Demo: 8 s of dribbling (front view)' };
+}
+
+// Standing vertical jumps. The figure is ~0.71 units tall, so 185 cm ≈ 259 cm/unit.
+const JUMP_VARIANTS = [
+  { heightCm: 52, knee: 108, hinge: 42, arm: 170, landKnee: 118 },
+  { heightCm: 41, knee: 142, hinge: 18, arm: 80, landKnee: 125 }, // shallow dip, weak arm swing
+  { heightCm: 49, knee: 112, hinge: 38, arm: 165, landKnee: 170 }, // stiff landing
+];
+
+export function demoJump({ fps = 30, seed = 11, athleteCm = 185 } = {}) {
+  const noise = rng(seed);
+  const cmPerUnit = (athleteCm * 0.925) / 0.66;
+  const period = 3.4, tk = 1.3;
+  const frames = [];
+  const total = JUMP_VARIANTS.length * period + 0.3;
+  for (let i = 0; i <= total * fps; i++) {
+    const t = i / fps;
+    const k = Math.min(JUMP_VARIANTS.length - 1, Math.floor(t / period));
+    const v = JUMP_VARIANTS[k];
+    const local = t - k * period;
+    const T0 = 2 * Math.sqrt((2 * v.heightCm) / 100 / 9.81);
+    const L = tk + T0;
+    // [time, knee, lean, shoulder, elbow, raise]
+    const keys = [
+      [0, 174, 4, 10, 170, 0],
+      [0.5, 174, 4, 10, 170, 0],
+      [0.95, v.knee, v.hinge, -45, 165, 0],
+      [1.2, 172, 8, v.arm * 0.85, 170, 0.6],
+      [tk, 178, 3, v.arm, 172, 1],
+      [tk + T0 * 0.6, 176, 3, v.arm - 10, 172, 1],
+      [L, 172, 5, 110, 170, 1],
+      [L + 0.08, (172 + v.landKnee) / 2, 15, 80, 165, 0],
+      [L + 0.2, v.landKnee, 30, 50, 160, 0],
+      [L + 0.85, 174, 4, 10, 170, 0],
+      [period, 174, 4, 10, 170, 0],
+    ];
+    const [knee, lean, shoulder, elbow, raise] = interp(keys, local);
+    const air = local > tk && local < L ? 1 - ((local - tk - T0 / 2) / (T0 / 2)) ** 2 : 0;
+    frames.push({
+      t,
+      lm: sidePose({
+        cx: 0.85,
+        knee, lean, shoulder, elbow, raise,
+        lift: (air * v.heightCm) / cmPerUnit,
+        offShoulder: shoulder - 4,
+        offElbow: elbow - 4,
+      }, noise),
+    });
+  }
+  return { frames, aspect: 16 / 9, mode: 'jump', label: 'Demo: 3 standing vertical jumps (side view)', athlete: { heightCm: athleteCm }, jumpType: 'standing' };
 }

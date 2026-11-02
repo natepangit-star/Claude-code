@@ -23,7 +23,7 @@
       <section id="view-analyze" class="view">
         <div class="hero">
           <h1>Film it. Analyze it. Get better.</h1>
-          <p class="muted">Upload a clip of your jump shot or dribbling. HoopLab tracks your body in the browser, measures your form and builds a coaching report. Your video never leaves your device.</p>
+          <p class="muted">Upload a clip of your jumps, dunk attempts, jump shot or dribbling. HoopLab tracks your body in the browser, measures your form and builds a coaching report. Your video never leaves your device.</p>
         </div>
 
         <div class="analyze-grid">
@@ -47,15 +47,28 @@
               <fieldset>
                 <legend>Skill</legend>
                 <div class="seg" role="radiogroup">
-                  <label><input type="radio" name="mode" value="shooting" checked /><span>🏀 Shooting</span></label>
+                  <label><input type="radio" name="mode" value="jump" checked /><span>🚀 Jump / dunk</span></label>
+                  <label><input type="radio" name="mode" value="shooting" /><span>🏀 Shooting</span></label>
                   <label><input type="radio" name="mode" value="dribbling" /><span>⛹ Dribbling</span></label>
                 </div>
               </fieldset>
-              <label>Shooting / dribbling hand
+              <label id="handOpt" hidden>Shooting / dribbling hand
                 <select id="hand"><option value="auto">Auto-detect</option><option value="right">Right</option><option value="left">Left</option></select>
               </label>
               <label>Camera angle
                 <select id="view"><option value="auto">Auto-detect</option><option value="side">Side-on</option><option value="front">Facing camera</option></select>
+              </label>
+              <label class="jump-opt">Jump type
+                <select id="jumpType"><option value="standing">Standing vertical</option><option value="approach">Approach / run-up (dunk)</option></select>
+              </label>
+              <label class="jump-opt">Your height
+                <span class="unit-input"><input type="number" id="athleteHeight" min="0" step="0.5" placeholder="e.g. 180" /><span class="unit-label">cm</span></span>
+              </label>
+              <label class="jump-opt">Standing reach <span class="muted">(optional)</span>
+                <span class="unit-input"><input type="number" id="athleteReach" min="0" step="0.5" placeholder="auto" /><span class="unit-label">cm</span></span>
+              </label>
+              <label>Units
+                <select id="units"><option value="cm">Metric (cm)</option><option value="in">Imperial (in)</option></select>
               </label>
               <label>Analysis quality
                 <select id="quality"><option value="fast">Fast</option><option value="accurate">Accurate (slower)</option></select>
@@ -78,6 +91,7 @@
               <h3>No video handy?</h3>
               <p class="muted small">Explore a full report with sample data.</p>
               <div class="actions">
+                <button class="btn" id="demoJump">Demo: vertical jumps</button>
                 <button class="btn" id="demoShoot">Demo: jump shots</button>
                 <button class="btn" id="demoDribble">Demo: dribbling</button>
               </div>
@@ -86,6 +100,7 @@
               <h3>Filming tips</h3>
               <ul>
                 <li><b>Whole body in frame</b>, head to feet, for the whole clip.</li>
+                <li><b>Jumps / dunks:</b> camera on a tripod, side-on, with your feet and the floor visible for the whole jump. Use 30 fps or more (60 fps is better). For an approach, film the last 2–3 steps and the take-off.</li>
                 <li><b>Shooting:</b> film from the side (shooting-hand side) for angles and arc. Film facing you to check elbow alignment.</li>
                 <li><b>Dribbling:</b> film facing you, 5+ seconds of continuous dribbling.</li>
                 <li>Tripod or a steady phone at waist height, 3–6 m away.</li>
@@ -122,6 +137,7 @@
 
           <div id="tab-interactive" class="tabpanel">
             <div class="kpis" id="kpis"></div>
+            <div class="card perf" id="perfCard" hidden></div>
             <div class="inter-grid">
               <div class="card player-card">
                 <div id="player"></div>

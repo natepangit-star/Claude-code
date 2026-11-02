@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  angleAt, scoreValue, findPeaks, fillGaps, analyzeSession, detectView, detectShootingHand,
+  angleAt, scoreValue, findPeaks, fillGaps, analyzeSession, detectView, detectShootingHand, heightFromFlight,
 } from '../src/analysis.js';
-import { demoShooting, demoDribbling } from '../src/demo.js';
+import { demoShooting, demoDribbling, demoJump } from '../src/demo.js';
 import { summaryHtml, standaloneHtml } from '../src/summary.js';
 
 test('angleAt computes interior angles', () => {
@@ -78,4 +78,53 @@ test('static report renders with all sections', () => {
   const doc = standaloneHtml(s, { title: 'test <clip>' });
   assert.ok(doc.startsWith('<!doctype html>'));
   assert.ok(doc.includes('test &lt;clip&gt;'), 'escapes user text');
+});
+
+test('heightFromFlight matches projectile physics', () => {
+  // 0.6 s in the air ≈ 44 cm
+  assert.equal(Math.round(heightFromFlight(0.6)), 44);
+  assert.equal(heightFromFlight(0), null);
+});
+
+test('jump demo: measures each jump height within 3 cm from flight time', () => {
+  const d = demoJump();
+  const s = analyzeSession(d.frames, { mode: 'jump', jumpType: 'standing', heightCm: 185 });
+  assert.ok(!s.error, s.error);
+  assert.equal(s.reps.length, 3);
+  const truth = [52, 41, 49];
+  s.reps.forEach((r, i) => {
+    assert.ok(Math.abs(r.height - truth[i]) < 3, `jump ${i + 1}: ${r.height.toFixed(1)} vs ${truth[i]}`);
+    const types = r.events.map((e) => e.type);
+    assert.deepEqual(types, ['bottom', 'takeoff', 'peak', 'landing', 'absorb']);
+    assert.ok(r.events.every((e, k) => k === 0 || e.t >= r.events[k - 1].t), 'events ordered');
+    // Hip-rise cross-check agrees roughly with flight-time height.
+    assert.ok(Math.abs(r.metrics.hipRise.value - r.height) < 10);
+  });
+  const P = s.summary.performance;
+  assert.equal(Math.round(P.best), Math.round(s.reps[0].height));
+  assert.equal(P.reach, Math.round(185 * 1.33));
+  assert.ok(P.reachEstimated);
+  assert.ok(Math.abs(P.toDunk - (320 - P.maxTouch)) < 1e-9);
+  // Jump 2 has a shallow dip and weak arms; jump 3 a stiff landing.
+  const issues = s.summary.focus.map((f) => f.key);
+  assert.ok(issues.includes('armDrive'), issues.join());
+  assert.ok(issues.includes('loadDepth') || issues.includes('hipHinge'), issues.join());
+  assert.ok(s.reps[2].metrics.landingFlex.score < 80);
+  assert.ok(s.summary.plan.some((d) => d.items.some((x) => x.startsWith('Strength'))));
+});
+
+test('jump: approach type uses approach ideals and no height means no dunk meter', () => {
+  const d = demoJump();
+  const s = analyzeSession(d.frames, { mode: 'jump', jumpType: 'approach' });
+  assert.equal(s.jumpType, 'approach');
+  assert.equal(s.summary.performance.maxTouch, null);
+  assert.ok(!s.reps[0].metrics.hipRise, 'hip rise needs athlete height');
+  const html = summaryHtml(s);
+  assert.ok(html.includes('Add your height'));
+});
+
+test('jump: standing still produces a friendly error', () => {
+  const still = demoJump().frames.slice(0, 15).map((f, i) => ({ ...f, t: i / 30 }));
+  const frames = Array.from({ length: 90 }, (_, i) => ({ t: i / 30, lm: still[i % 15].lm }));
+  assert.match(analyzeSession(frames, { mode: 'jump' }).error, /No jump detected/);
 });

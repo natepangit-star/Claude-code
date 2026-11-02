@@ -1,6 +1,6 @@
 // The static report: one HTML builder used both for the in-app "Summary" tab
 // and for the downloadable stand-alone HTML file.
-import { MODES, formatMetric, formatIdeal } from './metrics.js';
+import { MODES, formatMetric, formatIdeal, metricDefs, formatLen } from './metrics.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -53,9 +53,11 @@ function fmtDate(iso) {
  */
 export function summaryHtml(session, extra = {}) {
   const S = session.summary;
-  const defs = MODES[session.mode].metrics;
+  const defs = metricDefs(session);
   const isShot = session.mode === 'shooting';
-  const repWord = isShot ? 'shots' : 'sets';
+  const isJump = session.mode === 'jump';
+  const repWord = isShot ? 'shots' : isJump ? 'jumps' : 'sets';
+  const perf = S.performance;
   const metricRows = Object.entries(S.metrics).map(([key, m]) => {
     const def = defs[key];
     return `<div class="mrow">
@@ -64,14 +66,25 @@ export function summaryHtml(session, extra = {}) {
         <span class="pill ${scoreClass(m.score)}">${m.score ?? 'info'}</span>
       </div>
       <div class="mrow-vals">
-        <span><b>${esc(formatMetric(def, m.mean))}</b>${m.sd != null && m.n > 1 ? ` <span class="muted">± ${esc(formatMetric({ ...def, format: null, unit: def.unit }, m.sd))}</span>` : ''}</span>
-        <span class="muted">ideal ${esc(formatIdeal(def))}</span>
+        <span><b>${esc(formatMetric(def, m.mean))}</b>${m.sd != null && m.n > 1 ? ` <span class="muted">± ${esc(def.unit === 'cm' ? formatLen(m.sd) : formatMetric({ ...def, format: null, unit: def.unit }, m.sd))}</span>` : ''}</span>
+        <span class="muted">${def.ideal ? `ideal ${esc(formatIdeal(def))}` : ''}</span>
       </div>
       ${rangeBar(def, m.mean, m.n > 1 ? m.values : [])}
     </div>`;
   }).join('');
 
-  const repBars = session.reps.length > 1 ? `
+  const maxH = isJump ? Math.max(...session.reps.map((r) => r.height || 0), 1) : 0;
+  const heightBars = isJump ? `
+    <section class="card">
+      <h3>Height by jump</h3>
+      <div class="bars">
+        ${session.reps.map((r) => `<div class="bar-row"><span class="bar-label">${esc(r.label)}</span>
+          <span class="bar-track"><span class="bar-fill jump${r.height === perf?.best ? ' best' : ''}" style="width:${((100 * (r.height || 0)) / maxH).toFixed(1)}%"></span></span>
+          <span class="bar-val wide">${esc(formatLen(r.height))}</span></div>`).join('')}
+      </div>
+      <p class="muted small">Technique score per jump: ${session.reps.map((r) => `${esc(r.label)} <b>${r.score ?? '—'}</b>`).join(' · ')}</p>
+    </section>` : '';
+  const repBars = !isJump && session.reps.length > 1 ? `
     <section class="card">
       <h3>Score by ${isShot ? 'shot' : 'set'}</h3>
       <div class="bars">
@@ -115,30 +128,74 @@ export function summaryHtml(session, extra = {}) {
         <div class="eyebrow">${esc(MODES[session.mode].label)}${extra.title ? ` · ${esc(extra.title)}` : ''}</div>
         <h2>${esc(S.grade.label)} <span class="grade">${esc(S.grade.letter)}</span></h2>
         <div class="chips">
-          <span class="chip">${session.reps.length} ${session.reps.length === 1 && isShot ? 'shot' : repWord}${!isShot && session.reps[0]?.dribbleCount ? ` · ${session.reps[0].dribbleCount} dribbles` : ''}</span>
+          <span class="chip">${session.reps.length} ${session.reps.length === 1 ? repWord.slice(0, -1) : repWord}${!isShot && session.reps[0]?.dribbleCount ? ` · ${session.reps[0].dribbleCount} dribbles` : ''}</span>
           <span class="chip">${esc(session.view)} view</span>
-          <span class="chip">${esc(session.hand)} hand</span>
+          ${isJump ? `<span class="chip">${perf?.jumpType === 'approach' ? 'approach jump' : 'standing jump'}</span>` : `<span class="chip">${esc(session.hand)} hand</span>`}
           <span class="chip">${session.duration.toFixed(1)} s</span>
           <span class="chip">${esc(fmtDate(session.createdAt))}</span>
         </div>
         <div class="subscores">
-          <span>Form <b>${S.formScore ?? '—'}</b></span>
+          <span>${isJump ? 'Technique' : 'Form'} <b>${S.formScore ?? '—'}</b></span>
           ${S.consistency != null ? `<span>Consistency <b>${S.consistency}</b></span>` : ''}
         </div>
       </div>
     </header>
     ${warnings}
+    ${isJump && perf ? `<section class="card wide perf">${performanceHtml(perf)}</section>` : ''}
     <div class="grid">
       <section class="card"><h3>Focus areas</h3>${focus}</section>
       <section class="card"><h3>Strengths</h3>${strengths}</section>
       <section class="card"><h3>Metrics</h3><div class="mlist">${metricRows}</div>
         <p class="muted small">Orange marker = average${session.reps.length > 1 ? ', dots = individual ' + repWord : ''}. Shaded band = ideal range.</p></section>
+      ${heightBars}
       ${repBars}
       <section class="card"><h3>5-day practice plan</h3>${plan}</section>
       ${timeline}
       ${kf}
     </div>
     <p class="muted small foot">Measured from 2D pose tracking (${esc(session.view)} view). Angles are estimates; film from the same angle each time to track progress reliably.</p>
+  </div>`;
+}
+
+/** Jump headline numbers + dunk meter. */
+export function performanceHtml(perf) {
+  const stat = (label, value, sub = '') => `<div class="pstat"><div class="eyebrow">${label}</div><b>${value}</b>${sub ? `<span class="muted small">${sub}</span>` : ''}</div>`;
+  return `<div class="pstats">
+      ${stat('Best jump', esc(formatLen(perf.best)), esc(perf.bestLabel || ''))}
+      ${stat('Average', esc(formatLen(perf.avg)))}
+      ${stat('Best flight time', perf.bestFlight != null ? `${perf.bestFlight.toFixed(3)} s` : '—')}
+      ${stat('Max touch', perf.maxTouch != null ? esc(formatLen(perf.maxTouch)) : '—', perf.reach != null ? `reach ${esc(formatLen(perf.reach))}${perf.reachEstimated ? ' (est.)' : ''} + jump` : 'add your height')}
+    </div>
+    ${dunkMeter(perf)}`;
+}
+
+export function dunkMeter(perf) {
+  if (perf.maxTouch == null) {
+    return '<p class="muted small dunk-note">Add your height (and standing reach, if you know it) on the Analyze page to see your dunk meter.</p>';
+  }
+  const lo = Math.min(perf.reach, perf.rim - 60);
+  const hi = Math.max(perf.dunkTarget + 30, perf.maxTouch + 10);
+  const pos = (cm) => ((100 * (cm - lo)) / (hi - lo)).toFixed(1);
+  const canDunk = perf.toDunk <= 0;
+  const canTouch = perf.toRim <= 0;
+  const msg = canDunk
+    ? 'You have the bounce to dunk 🔥 Now work on ball control at the rim.'
+    : canTouch
+      ? `You can touch the rim. ${esc(formatLen(perf.toDunk))} more to dunk.`
+      : `${esc(formatLen(perf.toRim))} to touch the rim · ${esc(formatLen(perf.toDunk))} to dunk.`;
+  const typeNote = perf.jumpType === 'standing'
+    ? ' This is a standing jump. A good run-up approach typically adds 10–20% more height.'
+    : '';
+  return `<div class="dunk">
+    <div class="dunk-head"><b>Dunk meter</b><span class="${canDunk ? 'good-t' : canTouch ? 'ok-t' : ''}">${msg}</span></div>
+    <div class="dunk-track" role="img" aria-label="Max touch ${esc(formatLen(perf.maxTouch))}, rim ${esc(formatLen(perf.rim))}">
+      <span class="dunk-fill" style="left:${pos(perf.reach)}%;width:${(pos(perf.maxTouch) - pos(perf.reach)).toFixed(1)}%"></span>
+      <span class="dunk-mark rim" style="left:${pos(perf.rim)}%"><i>Rim ${esc(formatLen(perf.rim))}</i></span>
+      <span class="dunk-mark dunkm" style="left:${pos(perf.dunkTarget)}%"><i>Dunk ~${esc(formatLen(perf.dunkTarget))}</i></span>
+      <span class="dunk-you" style="left:${pos(perf.maxTouch)}%"></span>
+    </div>
+    <div class="dunk-scale muted small"><span>Standing reach ${esc(formatLen(perf.reach))}</span><span>Your max touch ${esc(formatLen(perf.maxTouch))}</span></div>
+    <p class="muted small">Max touch = standing reach + jump height. Reach is ${perf.reachEstimated ? 'estimated as 1.33 × height. Measure yours (flat-footed, one arm up) for a more accurate meter.' : 'what you entered.'}${typeNote}</p>
   </div>`;
 }
 
@@ -191,6 +248,22 @@ export const REPORT_CSS = `
 .bar-fill{display:block;height:100%;border-radius:6px;background:var(--muted)}
 .bar-fill.good{background:var(--good)} .bar-fill.ok{background:var(--ok)} .bar-fill.bad{background:var(--bad)}
 .bar-val{text-align:right;font-weight:700}
+.bar-row:has(.bar-val.wide){grid-template-columns:70px 1fr 70px}
+.bar-fill.jump{background:color-mix(in srgb,var(--accent) 55%,var(--chip))} .bar-fill.jump.best{background:var(--accent)}
+.pstats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px}
+.pstat{display:flex;flex-direction:column}
+.pstat b{font-size:1.7rem;line-height:1.2}
+.dunk-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:30px}
+.good-t{color:var(--good);font-weight:700}.ok-t{color:var(--ok);font-weight:700}
+.dunk-track{position:relative;height:16px;border-radius:8px;background:var(--chip);margin:0 4px}
+.dunk-fill{position:absolute;top:0;bottom:0;border-radius:8px;background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 35%,transparent),var(--accent))}
+.dunk-you{position:absolute;top:-5px;width:6px;height:26px;margin-left:-3px;border-radius:3px;background:var(--text)}
+.dunk-mark{position:absolute;top:-6px;bottom:-6px;width:0;border-left:2px dashed var(--muted)}
+.dunk-mark.dunkm{border-left-color:var(--good)}
+.dunk-mark i{position:absolute;bottom:100%;transform:translateX(-50%);font-style:normal;font-size:.72rem;white-space:nowrap;color:var(--muted);padding-bottom:2px}
+.dunk-mark.rim i{transform:translateX(-100%);padding-right:4px}
+.dunk-mark.dunkm i{bottom:auto;top:100%;transform:translateX(-50%);padding:2px 0 0;color:var(--good)}
+.dunk-scale{display:flex;justify-content:space-between;gap:8px;margin-top:26px}
 .kf-rep{margin-bottom:12px}
 .kf-row{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px}
 .kf-row figure{margin:0;flex:0 0 auto}

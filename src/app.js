@@ -1,10 +1,10 @@
 import './style.css';
 import { analyzeSession } from './analysis.js';
-import { MODES, formatMetric, formatIdeal } from './metrics.js';
-import { summaryHtml, standaloneHtml, rangeBar, scoreClass, ring, REPORT_CSS } from './summary.js';
+import { MODES, formatMetric, formatIdeal, metricDefs, setUnits, getUnits, formatLen } from './metrics.js';
+import { summaryHtml, standaloneHtml, rangeBar, scoreClass, ring, dunkMeter, REPORT_CSS } from './summary.js';
 import { timelineChart, progressChart } from './charts.js';
 import { Player } from './player.js';
-import { demoShooting, demoDribbling } from './demo.js';
+import { demoShooting, demoDribbling, demoJump } from './demo.js';
 import { listSessions, saveSession, getSession, deleteSession, clearSessions } from './storage.js';
 
 const $ = (s) => document.querySelector(s);
@@ -94,12 +94,65 @@ function showError(msg, kind = 'error') {
 }
 function hideError() { $('#error').hidden = true; }
 
-function opts() {
-  return {
+// Athlete profile (height, reach, units) is remembered between visits.
+const PROFILE_KEY = 'hooplab.profile';
+const toCm = (v) => (v > 0 ? (getUnits() === 'in' ? v * 2.54 : v) : null);
+const fromCm = (cm) => (cm > 0 ? +(getUnits() === 'in' ? cm / 2.54 : cm).toFixed(1) : '');
+
+function loadProfile() {
+  let p = {};
+  try { p = JSON.parse(localStorage.getItem(PROFILE_KEY) || '{}') || {}; } catch { /* ignore */ }
+  setUnits(p.units || 'cm');
+  $('#units').value = getUnits();
+  $('#athleteHeight').value = fromCm(p.heightCm);
+  $('#athleteReach').value = fromCm(p.reachCm);
+  if (p.jumpType) $('#jumpType').value = p.jumpType;
+  if (p.mode) { const r = document.querySelector(`input[name=mode][value=${p.mode}]`); if (r) r.checked = true; }
+  syncUnitLabels();
+}
+function saveProfile() {
+  const p = {
+    units: getUnits(),
+    heightCm: toCm(Number($('#athleteHeight').value)),
+    reachCm: toCm(Number($('#athleteReach').value)),
+    jumpType: $('#jumpType').value,
     mode: document.querySelector('input[name=mode]:checked').value,
+  };
+  try { localStorage.setItem(PROFILE_KEY, JSON.stringify(p)); } catch { /* ignore */ }
+  return p;
+}
+function syncUnitLabels() {
+  $$('.unit-label').forEach((el) => { el.textContent = getUnits(); });
+  $('#athleteHeight').placeholder = getUnits() === 'in' ? 'e.g. 71' : 'e.g. 180';
+}
+function syncModeOptions() {
+  const mode = document.querySelector('input[name=mode]:checked').value;
+  $$('.jump-opt').forEach((el) => { el.hidden = mode !== 'jump'; });
+  $('#handOpt').hidden = mode === 'jump';
+}
+$$('input[name=mode]').forEach((r) => r.addEventListener('change', () => { syncModeOptions(); saveProfile(); }));
+['#athleteHeight', '#athleteReach', '#jumpType'].forEach((sel) => $(sel).addEventListener('change', saveProfile));
+$('#units').onchange = () => {
+  const h = toCm(Number($('#athleteHeight').value));
+  const r = toCm(Number($('#athleteReach').value));
+  setUnits($('#units').value);
+  $('#athleteHeight').value = fromCm(h);
+  $('#athleteReach').value = fromCm(r);
+  syncUnitLabels();
+  saveProfile();
+  if (state.current) renderReport(state.current, { keepTab: true });
+};
+
+function opts() {
+  const p = saveProfile();
+  return {
+    mode: p.mode,
     hand: $('#hand').value,
     view: $('#view').value,
     quality: $('#quality').value,
+    jumpType: p.jumpType,
+    heightCm: p.heightCm,
+    reachCm: p.reachCm,
   };
 }
 
@@ -120,7 +173,8 @@ $('#analyzeBtn').onclick = async () => {
     const end = Number($('#tEnd').value) || Infinity;
     const { frames, aspect, offset } = await extractPoses(video, {
       quality: o.quality,
-      fps: o.mode === 'dribbling' ? 20 : 15,
+      // Jumps need a high sample rate: flight time is measured to the frame.
+      fps: o.mode === 'jump' ? (o.quality === 'accurate' ? 60 : 30) : o.mode === 'dribbling' ? 20 : 15,
       start,
       end,
       signal: state.abort.signal,
@@ -151,12 +205,13 @@ function setProgress(p, text) {
 }
 
 async function runDemo(kind) {
-  const d = kind === 'shooting' ? demoShooting() : demoDribbling();
-  const session = analyzeSession(d.frames, { mode: d.mode });
+  const d = kind === 'shooting' ? demoShooting() : kind === 'jump' ? demoJump() : demoDribbling();
+  const session = analyzeSession(d.frames, { mode: d.mode, jumpType: d.jumpType, heightCm: d.athlete?.heightCm });
   if (session.error) return showError(session.error);
   await finishSession(session, { frames: d.frames, aspect: d.aspect, video: null, offset: 0, title: d.label, demo: true });
 }
 $('#demoShoot').onclick = () => runDemo('shooting');
+$('#demoJump').onclick = () => runDemo('jump');
 $('#demoDribble').onclick = () => runDemo('dribbling');
 
 // ------------------------------------------------------------------ session lifecycle
@@ -184,10 +239,11 @@ async function captureKeyframes(session) {
   if (!state.player) return session.keyframes || [];
   const was = state.player.t;
   const out = [];
-  if (session.mode === 'shooting') {
+  if (session.mode !== 'dribbling') {
+    const skip = new Set(['follow', 'landing']);
     for (const r of session.reps) {
       const items = [];
-      for (const e of r.events.filter((x) => x.type !== 'follow')) {
+      for (const e of r.events.filter((x) => !skip.has(x.type))) {
         items.push({ label: `${e.label} · ${e.t.toFixed(2)}s`, src: await state.player.snapshot(e.t, 260) });
       }
       out.push({ rep: r.label, items });
@@ -228,12 +284,15 @@ function renderReport(session, { keepTab = false } = {}) {
   const prev = previousOf(session);
   const delta = prev && S.overall != null && prev.summary.overall != null ? S.overall - prev.summary.overall : null;
   $('#kpis').innerHTML = `
-    <div class="kpi ring-kpi">${ring(S.overall, 92)}<div><div class="eyebrow">Overall</div><b>${esc(S.grade.label)}</b>
+    <div class="kpi ring-kpi">${ring(S.overall, 92)}<div><div class="eyebrow">${session.mode === 'jump' ? 'Technique' : 'Overall'}</div><b>${esc(S.grade.label)}</b>
       ${delta != null ? `<div class="delta ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta)} vs last session</div>` : ''}</div></div>
-    <div class="kpi"><div class="eyebrow">Form</div><b class="big">${S.formScore ?? '—'}</b></div>
+    ${session.mode === 'jump' ? jumpKpis(session, prev) : `<div class="kpi"><div class="eyebrow">Form</div><b class="big">${S.formScore ?? '—'}</b></div>
     <div class="kpi"><div class="eyebrow">Consistency</div><b class="big">${S.consistency ?? '—'}</b>${S.consistency == null ? `<span class="small muted">${session.mode === 'shooting' ? 'needs 2+ shots' : 'see rhythm metric'}</span>` : ''}</div>
-    <div class="kpi"><div class="eyebrow">${session.mode === 'shooting' ? 'Shots found' : 'Dribbles'}</div><b class="big">${session.mode === 'shooting' ? session.reps.length : session.reps[0].dribbleCount}</b></div>
+    <div class="kpi"><div class="eyebrow">${session.mode === 'shooting' ? 'Shots found' : 'Dribbles'}</div><b class="big">${session.mode === 'shooting' ? session.reps.length : session.reps[0].dribbleCount}</b></div>`}
     <div class="kpi"><div class="eyebrow">Top focus</div><b>${esc(S.focus[0]?.issue || 'Keep it up!')}</b></div>`;
+
+  $('#perfCard').hidden = !(session.mode === 'jump' && S.performance);
+  if (session.mode === 'jump' && S.performance) $('#perfCard').innerHTML = dunkMeter(S.performance);
 
   // Player
   state.player?.destroy();
@@ -256,17 +315,30 @@ function renderReport(session, { keepTab = false } = {}) {
   state.chart = timelineChart($('#timeline'), session, { onSeek: (t) => { state.player?.seek(t); state.chart.setPlayhead(t); selectRepAt(session, t); } });
   state.player?.onTime((t) => { state.chart.setPlayhead(t); });
   const evTypes = [...new Set(session.reps.flatMap((r) => r.events.map((e) => e.type)))];
-  const evLabel = { load: 'Load', set: 'Set point', release: 'Release', follow: 'Follow-through end', dribble: 'Dribble' };
+  const evLabel = {
+    load: 'Load', set: 'Set point', release: 'Release', follow: 'Follow-through end', dribble: 'Dribble',
+    bottom: 'Bottom of dip', takeoff: 'Take-off', peak: 'Peak', landing: 'Landing', absorb: 'Landing absorb',
+  };
   $('#eventLegend').innerHTML = evTypes.map((t) => `<span class="ev ev-${t}">${evLabel[t]}</span>`).join('');
 
   // Rep chips
   $('#repChips').innerHTML = session.reps.length > 1
-    ? session.reps.map((r, i) => `<button class="chip-btn ${i === state.rep ? 'active' : ''}" data-rep="${i}">${esc(r.label)} <span class="pill ${scoreClass(r.score)}">${r.score ?? '—'}</span></button>`).join('')
+    ? session.reps.map((r, i) => `<button class="chip-btn ${i === state.rep ? 'active' : ''}" data-rep="${i}">${esc(r.label)}${r.height != null ? ` · ${esc(formatLen(r.height))}` : ''} <span class="pill ${scoreClass(r.score)}">${r.score ?? '—'}</span></button>`).join('')
     : '';
   $$('#repChips [data-rep]').forEach((b) => { b.onclick = () => selectRep(session, Number(b.dataset.rep), true); });
   selectRep(session, Math.min(state.rep, session.reps.length - 1), false);
 
   renderSummaryTab(session);
+}
+
+function jumpKpis(session, prev) {
+  const P = session.summary.performance;
+  const pBest = prev?.summary.performance?.best;
+  const d = P && pBest != null ? P.best - pBest : null;
+  return `<div class="kpi"><div class="eyebrow">Best jump</div><b class="big">${esc(formatLen(P?.best))}</b>
+      ${d != null ? `<div class="delta ${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '▲' : '▼'} ${esc(formatLen(Math.abs(d)))} vs last</div>` : ''}</div>
+    <div class="kpi"><div class="eyebrow">Average</div><b class="big">${esc(formatLen(P?.avg))}</b></div>
+    <div class="kpi"><div class="eyebrow">${P?.toDunk != null ? (P.toDunk <= 0 ? 'Dunk' : 'To dunk') : 'Jumps found'}</div><b class="big">${P?.toDunk != null ? (P.toDunk <= 0 ? '✓' : esc(formatLen(P.toDunk))) : session.reps.length}</b></div>`;
 }
 
 function selectRepAt(session, t) {
@@ -278,7 +350,7 @@ function selectRep(session, i, seek) {
   state.rep = i;
   const rep = session.reps[i];
   $$('#repChips [data-rep]').forEach((b) => b.classList.toggle('active', Number(b.dataset.rep) === i));
-  const defs = MODES[session.mode].metrics;
+  const defs = metricDefs(session);
   $('#metricCards').innerHTML = Object.entries(rep.metrics).map(([key, m]) => {
     const def = defs[key];
     const evType = rep.metricEvent[key];
@@ -286,7 +358,7 @@ function selectRep(session, i, seek) {
     const dir = def.ideal && m.score < 100 ? (m.value < def.ideal[0] ? def.low : def.high) : null;
     return `<div class="mcard">
       <div class="mrow-head"><span class="mrow-label">${esc(def.label)}</span><span class="pill ${scoreClass(m.score)}">${m.score ?? 'info'}</span></div>
-      <div class="mrow-vals"><b>${esc(formatMetric(def, m.value))}</b><span class="muted small">ideal ${esc(formatIdeal(def))}</span></div>
+      <div class="mrow-vals"><b>${esc(formatMetric(def, m.value))}</b><span class="muted small">${def.ideal ? `ideal ${esc(formatIdeal(def))}` : ''}</span></div>
       ${rangeBar(def, m.value)}
       ${dir ? `<p class="small mtip">${esc(dir.issue)}: ${esc(dir.tip)}</p>` : ''}
       ${ev && state.player ? `<button class="link small" data-seek="${ev.t}">▶ View ${esc(ev.label.toLowerCase())} (${ev.t.toFixed(2)}s)</button>` : ''}
@@ -348,7 +420,7 @@ function renderProgress() {
         ${ring(s.summary.overall, 48)}
         <div class="session-main">
           <b>${esc(s.title || 'Session')}</b>
-          <span class="small muted">${esc(MODES[s.mode].label)} · ${new Date(s.createdAt).toLocaleString()} · ${s.reps.length} ${s.mode === 'shooting' ? 'shots' : 'set'}</span>
+          <span class="small muted">${esc(MODES[s.mode].label)} · ${new Date(s.createdAt).toLocaleString()} · ${s.mode === 'jump' ? `${s.reps.length} jumps · best ${esc(formatLen(s.summary.performance?.best))}` : `${s.reps.length} ${s.mode === 'shooting' ? 'shots' : 'set'}`}</span>
           ${s.summary.focus[0] ? `<span class="small">Focus: ${esc(s.summary.focus[0].issue)}</span>` : ''}
         </div>
         <div class="session-actions">
@@ -373,4 +445,6 @@ function renderProgress() {
 }
 $('#clearHistory').onclick = () => { if (confirm('Delete all saved sessions?')) { clearSessions(); renderProgress(); } };
 
+loadProfile();
+syncModeOptions();
 route();
