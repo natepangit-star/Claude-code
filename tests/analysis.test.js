@@ -128,3 +128,17 @@ test('jump: standing still produces a friendly error', () => {
   const frames = Array.from({ length: 90 }, (_, i) => ({ t: i / 30, lm: still[i % 15].lm }));
   assert.match(analyzeSession(frames, { mode: 'jump' }).error, /No jump detected/);
 });
+
+test('jump: approach away from the camera (floor line moves) with athlete walking into frame', () => {
+  // Shift everything up the image over time, like running away from a fixed
+  // camera, and blank the first second as if the athlete is not yet in frame.
+  const frames = demoJump().frames.map((f) => ({
+    t: f.t,
+    lm: f.t < 1 ? null : f.lm.map((p) => ({ ...p, y: p.y - 0.02 * f.t })),
+  }));
+  const s = analyzeSession(frames, { mode: 'jump', jumpType: 'approach', heightCm: 185 });
+  assert.ok(!s.error, s.error);
+  assert.equal(s.reps.length, 3);
+  [52, 41, 49].forEach((h, i) => assert.ok(Math.abs(s.reps[i].height - h) < 4, `jump ${i + 1}: ${s.reps[i].height.toFixed(1)}`));
+  assert.ok(!s.warnings.some((w) => w.includes('only detected')), 'walking into frame is not a coverage problem');
+});

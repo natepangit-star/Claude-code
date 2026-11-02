@@ -174,7 +174,8 @@ $('#analyzeBtn').onclick = async () => {
     const { frames, aspect, offset } = await extractPoses(video, {
       quality: o.quality,
       // Jumps need a high sample rate: flight time is measured to the frame.
-      fps: o.mode === 'jump' ? (o.quality === 'accurate' ? 60 : 30) : o.mode === 'dribbling' ? 20 : 15,
+      // 60 samples/s also catches every frame of variable-frame-rate phone video.
+      fps: o.mode === 'jump' ? 60 : o.mode === 'dribbling' ? 20 : 15,
       start,
       end,
       signal: state.abort.signal,

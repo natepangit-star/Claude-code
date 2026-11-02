@@ -442,6 +442,95 @@ function footBottom(frames) {
   });
 }
 
+/**
+ * Find flight phases from the lowest visible foot point per frame.
+ *
+ * A foot is "on the floor" when it is both stationary and at the local lowest
+ * point. The floor level is measured separately before take-off and after
+ * landing, so approaching toward or away from the camera works. Thresholds
+ * scale with the body size in each frame.
+ *
+ * @param times seconds per sample
+ * @param foot lowest foot y per sample (image units, larger = lower)
+ * @param scale torso length per sample (same units)
+ */
+// Defaults tuned on synthetic jumps and real phone footage: the pose tracker lags
+// slightly on fast landings, so only half of the parabola correction is applied.
+export function detectFlights(times, foot, scale, { thrRatio = 0.08, correct = 0.5 } = {}) {
+  const n = times.length;
+  const dt = n > 1 ? (times[n - 1] - times[0]) / (n - 1) : 1 / 30;
+  const sec = (s) => Math.max(1, Math.round(s / dt));
+  const W = sec(0.8);
+
+  // Height above the lower envelope on both sides (min of the two handles drift).
+  const envBefore = [], envAfter = [];
+  for (let i = 0; i < n; i++) {
+    let b = null, a = null;
+    for (let k = Math.max(0, i - W); k <= i; k++) if (foot[k] != null && (b == null || foot[k] > b)) b = foot[k];
+    for (let k = i; k <= Math.min(n - 1, i + W); k++) if (foot[k] != null && (a == null || foot[k] > a)) a = foot[k];
+    envBefore.push(b); envAfter.push(a);
+  }
+  const lift = foot.map((v, i) => (v == null || envBefore[i] == null || envAfter[i] == null ? null : (Math.min(envBefore[i], envAfter[i]) - v) / scale[i]));
+
+  // Stationary: small movement to both neighbours (a repeated video frame only gives one).
+  const vmax = (i) => 1.2 * scale[i] * dt; // ~1.2 torso lengths per second
+  const still = foot.map((v, i) => i > 0 && i < n - 1 && v != null && foot[i - 1] != null && foot[i + 1] != null
+    && Math.abs(v - foot[i - 1]) <= vmax(i) && Math.abs(foot[i + 1] - v) <= vmax(i));
+  const low = (i, env) => foot[i] != null && env[i] != null && env[i] - foot[i] <= 0.3 * scale[i];
+  const onGround = foot.map((_, i) => still[i] && (low(i, envBefore) || low(i, envAfter)));
+
+  const peaks = findPeaks(lift, { minHeight: 0.4, minGap: sec(0.5), radius: sec(0.12) });
+  const jumps = [];
+  let rejected = false;
+  for (const p of peaks) {
+    if (jumps.length && p <= jumps[jumps.length - 1].b) continue;
+    // Walking out from the apex, the first stationary, not-lifted frame on each
+    // side is the plant (take-off) and the landing. (An approach run starts
+    // closer to the camera, so earlier steps sit lower in the image.)
+    const planted = (k) => still[k] && (lift[k] == null || lift[k] < 0.25);
+    let c = p - 1;
+    while (c > 0 && !planted(c)) c--;
+    if (!planted(c)) continue;
+    const runL = [];
+    for (let k = c; k >= 0 && planted(k) && runL.length < sec(0.25); k--) runL.push(foot[k]);
+    const gL = median(runL);
+    // Landing side: the nearest run of planted frames after the apex.
+    let d = p + 1;
+    while (d < n - 1 && !planted(d)) d++;
+    if (!planted(d)) continue;
+    const runR = [];
+    for (let k = d; k < n && planted(k) && runR.length < sec(0.25); k++) runR.push(foot[k]);
+    const gR = median(runR);
+
+    const thrL = thrRatio * scale[c], thrR = thrRatio * scale[d];
+    let a = c + 1;
+    while (a < p && (foot[a] == null || foot[a] > gL - thrL)) a++;
+    let b = d - 1;
+    while (b > p && (foot[b] == null || foot[b] > gR - thrR)) b--;
+    if (a > p || b < p || foot[a - 1] == null || foot[b + 1] == null) continue;
+    const cross = (i0, i1, level) => {
+      const u = (foot[i0] - level) / (foot[i0] - foot[i1]);
+      return times[i0] + Math.max(0, Math.min(1, u)) * (times[i1] - times[i0]);
+    };
+    const tTake = cross(a - 1, a, gL - thrL);
+    const tLand = cross(b + 1, b, gR - thrR);
+    // Feet height above a floor line interpolated from take-off to landing spot.
+    let peakH = 0;
+    for (let k = a; k <= b; k++) {
+      if (foot[k] == null) continue;
+      const u = (times[k] - tTake) / Math.max(1e-6, tLand - tTake);
+      peakH = Math.max(peakH, gL + (gR - gL) * u - foot[k]);
+    }
+    // The threshold is crossed slightly above the floor; correct assuming a parabolic flight.
+    const thr = correct * (thrL + thrR) / 2;
+    const flight = (tLand - tTake) / Math.sqrt(Math.max(0.25, 1 - thr / Math.max(peakH, 2 * thr)));
+    if (flight < 0.15) continue; // a step or a hop, not a jump
+    if (flight > 1.1) { rejected = true; continue; }
+    jumps.push({ a, b, apex: p, tTake, tLand, flight, gL, gR, peakH });
+  }
+  return { jumps, onGround, lift, rejected };
+}
+
 function analyzeJump(frames, view, opts) {
   const times = frames.map((f) => f.t);
   const n = times.length;
@@ -455,71 +544,34 @@ function analyzeJump(frames, view, opts) {
   if (dt > 0.05) warnings.push('Low sample rate: jump height is less precise. Use a 30 fps (or faster) clip.');
 
   const foot = median3(fillGaps(footBottom(frames), 2));
-  const thr = Math.max(0.012, 0.06 * T);
-  const ground0 = percentile(foot, 80);
-  if (ground0 == null) return { error: 'Your feet were not visible. Film with your whole body and the floor in frame.' };
+  if (!foot.some((v) => v != null)) return { error: 'Your feet were not visible. Film with your whole body and the floor in frame.' };
+  // Body scale per frame: the athlete gets smaller as they move away from the camera.
+  const scale = fillGaps(F.torso, 30).map((v) => v || T);
+  const { jumps, onGround, lift, rejected } = detectFlights(times, foot, scale);
+  if (rejected) warnings.push('Ignored a "jump" with an impossible flight time. Is the camera moving? Use a tripod.');
   const sec = (s) => Math.max(1, Math.round(s / dt));
-
-  // 1. Candidate airborne segments using a global floor line.
-  const segs = [];
-  let i = 0;
-  while (i < n) {
-    if (foot[i] == null || ground0 - foot[i] <= thr) { i++; continue; }
-    let j = i;
-    while (j + 1 < n && foot[j + 1] != null && ground0 - foot[j + 1] > thr) j++;
-    segs.push([i, j]);
-    i = j + 1;
-  }
-
-  // 2. Refine each with a local floor line and sub-frame crossing times.
-  const jumps = [];
-  for (const [a0, b0] of segs) {
-    if (a0 < 1 || b0 > n - 2) continue; // need ground contact on both sides
-    const near = [
-      ...foot.slice(Math.max(0, a0 - sec(0.6)), Math.max(0, a0 - 1)),
-      ...foot.slice(Math.min(n, b0 + sec(0.2)), Math.min(n, b0 + sec(0.7))),
-    ];
-    const g = median(near) ?? ground0;
-    const h = foot.map((v) => (v == null ? null : g - v));
-    let a = a0, b = b0;
-    while (a - 1 >= 0 && h[a - 1] != null && h[a - 1] > thr) a--;
-    while (b + 1 < n && h[b + 1] != null && h[b + 1] > thr) b++;
-    if (a < 1 || b > n - 2 || h[a - 1] == null || h[b + 1] == null) continue;
-    const cross = (i0, i1) => {
-      const u = (thr - h[i0]) / (h[i1] - h[i0]);
-      return times[i0] + Math.max(0, Math.min(1, u)) * (times[i1] - times[i0]);
-    };
-    const tTake = cross(a - 1, a);
-    const tLand = cross(b + 1, b);
-    const peakH = Math.max(...h.slice(a, b + 1).filter((v) => v != null));
-    const measured = tLand - tTake;
-    if (measured < 0.12 || peakH < 2.5 * thr) continue; // a step or noise, not a jump
-    // Crossings at `thr` happen below the floor contact; correct assuming a parabola.
-    const flight = measured / Math.sqrt(Math.max(0.25, 1 - thr / peakH));
-    if (flight > 1.1) {
-      warnings.push('Ignored a "jump" with an impossible flight time. Is the camera moving? Use a tripod.');
-      continue;
-    }
-    jumps.push({ a, b, g, h, tTake, tLand, flight, peakH });
-  }
   if (!jumps.length) {
     return { error: 'No jump detected. Keep the camera still (tripod), and keep your feet and the floor in frame for the whole jump.' };
   }
 
   // Scale (cm per unit) from the athlete's height, if given.
-  let cmPerUnit = null;
+  // Measured per torso length, so it still works as the athlete moves toward or
+  // away from the camera; cmAt(k) converts image units to cm at frame k.
+  let cmPerTorso = null;
   if (opts.heightCm > 0) {
     const noseY = frames.map((f) => pt(f.lm, LM.NOSE)?.y ?? null);
     const stand = [];
     for (let k = 0; k < n; k++) {
       if (foot[k] == null || noseY[k] == null || F.knee[k] == null) continue;
-      if (ground0 - foot[k] < thr && F.knee[k] > 160 && (F.lean[k] ?? 0) < 15) stand.push(foot[k] - noseY[k]);
+      if (onGround[k] && F.knee[k] > 160 && (F.lean[k] ?? 0) < 15) stand.push((foot[k] - noseY[k]) / scale[k]);
     }
     const s = percentile(stand, 75);
     // The nose sits at ~92.5% of standing height.
-    if (s) cmPerUnit = (opts.heightCm * 0.925) / s;
+    if (s) cmPerTorso = (opts.heightCm * 0.925) / s;
     else warnings.push('Could not find a frame of you standing upright, so cm-based cross-checks are skipped.');
   }
+
+  const cmAt = (k) => (cmPerTorso && scale[k] ? cmPerTorso / scale[k] : null);
 
   const armH = FR.wristH.map((r, k) => {
     const l = FL.wristH[k];
@@ -550,9 +602,10 @@ function analyzeJump(frames, view, opts) {
     const values = {
       jumpHeight: height,
       flightTime: jp.flight,
-      hipRise: cmPerUnit && F.hipY[take] != null && F.hipY[peak] != null ? Math.max(0, (F.hipY[take] - F.hipY[peak]) * cmPerUnit) : null,
-      approachSpeed: approach && cmPerUnit && F.hipX[appA] != null && F.hipX[appB] != null && appB > appA
-        ? (Math.abs(F.hipX[appB] - F.hipX[appA]) * cmPerUnit) / 100 / (times[appB] - times[appA]) : null,
+      hipRise: cmAt(take) && F.hipY[take] != null && F.hipY[peak] != null ? Math.max(0, (F.hipY[take] - F.hipY[peak]) * cmAt(peak)) : null,
+      // Side-on only: running toward/away from the camera hides horizontal speed.
+      approachSpeed: approach && view === 'side' && cmAt(take) && F.hipX[appA] != null && F.hipX[appB] != null && appB > appA
+        ? (Math.abs(F.hipX[appB] - F.hipX[appA]) * cmAt(take)) / 100 / (times[appB] - times[appA]) : null,
       loadDepth: F.knee[bottom],
       hipHinge: F.lean[bottom],
       transition: times[take] - times[bottom],
@@ -586,11 +639,11 @@ function analyzeJump(frames, view, opts) {
   });
 
   // Feet height above the (global) floor and arm height, in torso units.
-  const feet = foot.map((v) => (v == null ? null : Math.max(-0.2, (ground0 - v) / T)));
+  const feet = lift.map((v) => (v == null ? null : Math.max(-0.2, v)));
   return {
     reps,
     hand: 'both',
-    cmPerUnit,
+    cmPerTorso,
     series: { t: times, knee: F.knee, feet, arms: armH },
     chartSeries: [
       { key: 'knee', label: 'Knee angle', unit: '°', axis: 'deg', hidden: view === 'front' },
@@ -693,7 +746,10 @@ export function analyzeSession(frames, opts = {}) {
   if (res.error) return { error: res.error };
 
   const warnings = [...res.warnings];
-  const coverage = valid.length / frames.length;
+  // Count coverage from the first to the last detection (walking into frame is fine).
+  const firstSeen = frames.findIndex((f) => f.lm);
+  const lastSeen = frames.length - 1 - [...frames].reverse().findIndex((f) => f.lm);
+  const coverage = valid.length / Math.max(1, lastSeen - firstSeen + 1);
   if (coverage < 0.7) warnings.push(`The player was only detected in ${Math.round(coverage * 100)}% of frames, so some numbers may be less accurate.`);
 
   // Aggregate per metric across reps.
