@@ -19,6 +19,15 @@ npm run build      # static site in dist/ (host anywhere)
 
 No video handy? Use **Demo: vertical jumps**, **Demo: jump shots** or **Demo: dribbling** on the Analyze page to explore a full report with sample data.
 
+## Use it on your phone
+
+The app is a static site, so any static host works. Videos are still processed on the phone itself.
+
+- **GitHub Pages:** `.github/workflows/deploy.yml` builds, tests and deploys on every push to `main`. Turn it on in **Settings → Pages → Source: GitHub Actions**. Pages on a private repo needs a paid GitHub plan. The site is served at `https://<user>.github.io/<repo>/`.
+- **Netlify / Vercel / Cloudflare Pages** (free, private repos OK): import the repo, build command `npm run build`, output folder `dist`. `netlify.toml` is included.
+
+On the phone, open the URL and use **Share → Add to Home Screen** (iPhone) or **Install app** (Android) to get a HoopLab icon.
+
 ## Jump / dunk module
 
 Choose **Jump / dunk**, pick **Standing vertical** or **Approach / run-up**, and enter your height (and standing reach if you know it). Your profile is remembered.

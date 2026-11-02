@@ -31,23 +31,47 @@ async function getLandmarker(quality) {
 
 function seek(video, t) {
   return new Promise((resolve, reject) => {
+    let timer;
     const onSeeked = () => { cleanup(); resolve(); };
     const onError = () => { cleanup(); reject(new Error('Could not read the video at ' + t.toFixed(2) + 's')); };
-    const cleanup = () => { video.removeEventListener('seeked', onSeeked); video.removeEventListener('error', onError); };
+    const cleanup = () => {
+      clearTimeout(timer);
+      video.removeEventListener('seeked', onSeeked);
+      video.removeEventListener('error', onError);
+    };
     video.addEventListener('seeked', onSeeked);
     video.addEventListener('error', onError);
+    // Some browsers (notably iOS Safari) skip "seeked" when the time doesn't change.
+    timer = setTimeout(() => { cleanup(); resolve(); }, 1500);
     video.currentTime = t;
   });
 }
 
 export function loadVideo(video, file) {
   return new Promise((resolve, reject) => {
-    video.src = URL.createObjectURL(file);
+    // iOS Safari needs these set before the source, and won't buffer a video
+    // until it has been played once, so we briefly play and pause it (muted).
     video.muted = true;
+    video.defaultMuted = true;
     video.playsInline = true;
+    video.setAttribute('muted', '');
+    video.setAttribute('playsinline', '');
     video.preload = 'auto';
-    video.onloadeddata = () => resolve(video);
-    video.onerror = () => reject(new Error('This video format is not supported by your browser. Try MP4 (H.264) or WebM.'));
+    const timer = setTimeout(() => reject(new Error(
+      'The video did not load. On iPhone, record in "Most Compatible" format (Settings → Camera → Formats) or try a shorter clip.',
+    )), 20000);
+    video.onloadeddata = () => {
+      clearTimeout(timer);
+      video.pause();
+      resolve(video);
+    };
+    video.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error('This video format is not supported by your browser. Try MP4 (H.264) or WebM.'));
+    };
+    video.src = URL.createObjectURL(file);
+    video.load();
+    video.play()?.then(() => video.pause()).catch(() => { /* autoplay blocked: loadeddata usually still fires */ });
   });
 }
 
