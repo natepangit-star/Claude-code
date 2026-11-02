@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 // Metric definitions: ideal ranges, scoring weights and coaching content.
 // Values are measured from 2D pose landmarks, so every metric declares which
 // camera views it is reliable from.
@@ -87,7 +89,7 @@ export const SHOT_METRICS = {
     tol: 0.5,
     weight: 1.1,
     views: ['front'],
-    format: (v) => `${Math.round(v * 100)}% off`,
+    format: (v) => t('{v}% off', { v: Math.round(v * 100) }),
     why: 'Keeping the elbow under the ball keeps the shot on line left to right.',
     low: null,
     high: {
@@ -156,7 +158,7 @@ export const SHOT_METRICS = {
     tol: 0.6,
     weight: 1,
     views: ['side', 'front'],
-    format: (v) => `${v.toFixed(2)} torso`,
+    format: (v) => t('{v} torso', { v: v.toFixed(2) }),
     why: 'Drifting forward, back or sideways during the shot changes the distance and direction every time.',
     low: null,
     high: {
@@ -172,7 +174,7 @@ export const SHOT_METRICS = {
     ideal: null, // informational
     weight: 0,
     views: ['side', 'front'],
-    format: (v) => `${v.toFixed(2)} torso`,
+    format: (v) => t('{v} torso', { v: v.toFixed(2) }),
     why: 'How high your hips rise during the shot, relative to your torso length.',
   },
 };
@@ -202,7 +204,7 @@ export const DRIBBLE_METRICS = {
     tol: 0.4,
     weight: 1,
     views: ['side', 'front'],
-    format: (v) => (v > 0 ? `${v.toFixed(2)} above waist` : `${Math.abs(v).toFixed(2)} below waist`),
+    format: (v) => (v > 0 ? t('{v} above waist', { v: v.toFixed(2) }) : t('{v} below waist', { v: Math.abs(v).toFixed(2) })),
     why: 'Keeping the dribble at or below the waist protects the ball.',
     low: null,
     high: {
@@ -219,7 +221,7 @@ export const DRIBBLE_METRICS = {
     tol: 0.4,
     weight: 0.8,
     views: ['side', 'front'],
-    format: (v) => `${Math.round(v * 100)}% variation`,
+    format: (v) => t('{v}% variation', { v: Math.round(v * 100) }),
     why: 'An even rhythm means you control the ball, not the other way round. Then you can change pace on purpose.',
     low: null,
     high: {
@@ -236,7 +238,7 @@ export const DRIBBLE_METRICS = {
     tol: 0.3,
     weight: 1,
     views: ['side', 'front'],
-    format: (v) => `${v.toFixed(2)} torso`,
+    format: (v) => t('{v} torso', { v: v.toFixed(2) }),
     why: 'A low athletic stance (hip-to-ankle distance) gives quick first steps and protects the ball.',
     low: {
       issue: 'Stance too low',
@@ -257,7 +259,7 @@ export const DRIBBLE_METRICS = {
     tol: 0.25,
     weight: 1,
     views: ['side', 'front'],
-    format: (v) => `${v.toFixed(2)} torso`,
+    format: (v) => t('{v} torso', { v: v.toFixed(2) }),
     why: 'Eyes up lets you see the floor: teammates, defenders and the rim.',
     low: {
       issue: 'Looking at the ball',
@@ -274,7 +276,7 @@ export const DRIBBLE_METRICS = {
     tol: 0.6,
     weight: 0.8,
     views: ['front'],
-    format: (v) => `${v.toFixed(2)}× shoulders`,
+    format: (v) => t('{v}× shoulders', { v: v.toFixed(2) }),
     why: 'Feet a bit wider than shoulders give you a stable base to change direction.',
     low: {
       issue: 'Narrow base',
@@ -432,7 +434,7 @@ export const JUMP_METRICS = {
     tol: 0.6,
     weight: 1.1,
     views: ['side', 'front'],
-    format: (v) => `${v.toFixed(2)} torso above shoulder`,
+    format: (v) => t('{v} torso above shoulder', { v: v.toFixed(2) }),
     why: 'A powerful arm swing can add around 10% to jump height and gets your hands to the rim.',
     low: {
       issue: 'Weak arm swing',
@@ -485,7 +487,7 @@ export const JUMP_METRICS = {
     tol: 0.35,
     weight: 1.2,
     views: ['front'],
-    format: (v) => `${Math.round(v * 100)}% of ankle width`,
+    format: (v) => t('{v}% of ankle width', { v: Math.round(v * 100) }),
     why: 'Knees caving inward (valgus) on landing is a key ACL injury risk. Knees should track over the toes.',
     low: {
       issue: 'Knees caving in',
@@ -507,6 +509,17 @@ export function metricDefs(sessionOrMode, jumpType) {
   return out;
 }
 
+/** Metric definitions with display text in the current language (for rendering only). */
+export function localDefs(sessionOrMode, jumpType) {
+  const defs = metricDefs(sessionOrMode, jumpType);
+  const side = (x) => x && { issue: t(x.issue), tip: t(x.tip), drill: t(x.drill) };
+  const out = {};
+  for (const [k, d] of Object.entries(defs)) out[k] = { ...d, label: t(d.label), why: t(d.why), low: side(d.low), high: side(d.high) };
+  return out;
+}
+
+export const modeLabel = (mode) => t(MODES[mode]?.label ?? mode);
+
 export const MODES = {
   jump: { label: 'Jump / dunk', metrics: JUMP_METRICS },
   shooting: { label: 'Jump shot / free throw', metrics: SHOT_METRICS },
@@ -520,7 +533,7 @@ export function formatMetric(def, value) {
 }
 
 export function formatIdeal(def) {
-  if (!def.ideal) return 'info only';
+  if (!def.ideal) return t('info only');
   const [lo, hi] = def.ideal;
   const d = def.decimals ?? 1;
   const u = def.unit ?? '';

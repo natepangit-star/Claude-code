@@ -1,7 +1,8 @@
 import './style.css';
 import { analyzeSession } from './analysis.js';
-import { MODES, formatMetric, formatIdeal, metricDefs, setUnits, getUnits, formatLen } from './metrics.js';
-import { summaryHtml, standaloneHtml, rangeBar, scoreClass, ring, dunkMeter, REPORT_CSS } from './summary.js';
+import { formatMetric, formatIdeal, localDefs, setUnits, getUnits, formatLen, modeLabel } from './metrics.js';
+import { t, setLang, getLang, locale } from './i18n.js';
+import { summaryHtml, standaloneHtml, rangeBar, scoreClass, ring, dunkMeter, keyframeLabel, REPORT_CSS } from './summary.js';
 import { timelineChart, progressChart } from './charts.js';
 import { Player } from './player.js';
 import { demoShooting, demoDribbling, demoJump } from './demo.js';
@@ -34,6 +35,45 @@ $('#themeBtn').onclick = () => {
   if (location.hash === '#progress') renderProgress();
 };
 
+// ------------------------------------------------------------------ language
+const LANG_KEY = 'hooplab.lang';
+function initialLang() {
+  try {
+    const saved = localStorage.getItem(LANG_KEY);
+    if (saved) return saved;
+  } catch { /* ignore */ }
+  return (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+
+/** Translate the static page: elements marked data-i18n use their English content as the key. */
+function applyStaticText() {
+  for (const el of document.querySelectorAll('[data-i18n]')) {
+    if (el.dataset.i18nSrc == null) el.dataset.i18nSrc = el.innerHTML.replace(/\s+/g, ' ').trim();
+    el.innerHTML = t(el.dataset.i18nSrc);
+  }
+  for (const el of document.querySelectorAll('[data-i18n-ph]')) {
+    if (el.dataset.i18nPhSrc == null) el.dataset.i18nPhSrc = el.getAttribute('placeholder') || '';
+    el.setAttribute('placeholder', t(el.dataset.i18nPhSrc));
+  }
+  for (const el of document.querySelectorAll('[data-i18n-aria]')) {
+    if (el.dataset.i18nAriaSrc == null) el.dataset.i18nAriaSrc = el.getAttribute('aria-label') || '';
+    el.setAttribute('aria-label', t(el.dataset.i18nAriaSrc));
+  }
+  document.title = t('HoopLab – Basketball Skill Analysis');
+  $('#langBtn').textContent = getLang() === 'zh' ? 'EN' : '中文';
+  $('#langBtn').setAttribute('aria-label', getLang() === 'zh' ? 'Switch to English' : '切换到中文');
+}
+
+function changeLang(lang) {
+  setLang(lang);
+  try { localStorage.setItem(LANG_KEY, lang); } catch { /* ignore */ }
+  applyStaticText();
+  syncUnitLabels();
+  if (state.current) renderReport(state.current, { keepTab: true });
+  if (location.hash === '#progress') renderProgress();
+}
+$('#langBtn').onclick = () => changeLang(getLang() === 'zh' ? 'en' : 'zh');
+
 // ------------------------------------------------------------------ routing
 const state = { file: null, current: null, player: null, chart: null, progress: null, abort: null, rep: 0 };
 
@@ -61,14 +101,17 @@ const drop = $('#drop');
 function setFile(file) {
   if (!file) return;
   if (!file.type.startsWith('video/') && !/\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(file.name)) {
-    showError('Please choose a video file.');
+    showError(t('Please choose a video file.'));
     return;
   }
   state.file = file;
   hideError();
+  if (preview.src) URL.revokeObjectURL(preview.src);
   preview.src = URL.createObjectURL(file);
   preview.hidden = false;
   $('#dropInner').hidden = true;
+  $('#fileName').textContent = file.name;
+  $('#fileBar').hidden = false;
   preview.onloadedmetadata = () => {
     const d = Number.isFinite(preview.duration) ? preview.duration : 60;
     $('#tStart').value = 0;
@@ -76,11 +119,21 @@ function setFile(file) {
     $('#tEnd').max = d.toFixed(1);
     $('#trim').hidden = false;
     $('#analyzeBtn').disabled = false;
-    if (d > 60) showError('Long video: only the first 60 s are selected. Adjust Start/End to pick the part you want analyzed.', 'info');
+    if (d > 60) showError(t('Long video: only the first 60 s are selected. Adjust Start/End to pick the part you want analyzed.'), 'info');
   };
 }
-fileInput.onchange = () => setFile(fileInput.files[0]);
+fileInput.onchange = () => {
+  setFile(fileInput.files[0]);
+  fileInput.value = ''; // lets you pick the same file again later
+};
+// Once a video is loaded, taps on its preview control playback instead of opening the picker.
 drop.addEventListener('click', (e) => { if (e.target === preview) e.preventDefault(); });
+function chooseAnother() {
+  location.hash = '#analyze';
+  fileInput.click();
+}
+$('#changeFile').onclick = (e) => { e.preventDefault(); chooseAnother(); };
+$('#newVideoBtn').onclick = () => chooseAnother();
 ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
 ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
 drop.addEventListener('drop', (e) => setFile(e.dataTransfer.files[0]));
@@ -123,7 +176,7 @@ function saveProfile() {
 }
 function syncUnitLabels() {
   $$('.unit-label').forEach((el) => { el.textContent = getUnits(); });
-  $('#athleteHeight').placeholder = getUnits() === 'in' ? 'e.g. 71' : 'e.g. 180';
+  $('#athleteHeight').placeholder = t(getUnits() === 'in' ? 'e.g. 71' : 'e.g. 180');
 }
 function syncModeOptions() {
   const mode = document.querySelector('input[name=mode]:checked').value;
@@ -163,7 +216,7 @@ $('#analyzeBtn').onclick = async () => {
   $('#analyzeBtn').disabled = true;
   $('#cancelBtn').hidden = false;
   $('#progress').hidden = false;
-  setProgress(0, 'Loading video…');
+  setProgress(0, t('Loading video…'));
   state.abort = new AbortController();
   try {
     const { loadVideo, extractPoses } = await import('./pose.js');
@@ -179,18 +232,18 @@ $('#analyzeBtn').onclick = async () => {
       start,
       end,
       signal: state.abort.signal,
-      onStatus: (s) => setProgress(null, s),
-      onProgress: (p) => setProgress(p, `Tracking your movement… ${Math.round(p * 100)}%`),
+      onStatus: (s) => setProgress(null, t(s)),
+      onProgress: (p) => setProgress(p, t('Tracking your movement… {p}%', { p: Math.round(p * 100) })),
     });
-    setProgress(1, 'Crunching the numbers…');
+    setProgress(1, t('Crunching the numbers…'));
     const session = analyzeSession(frames, o);
     if (session.error) throw new Error(session.error);
     await finishSession(session, { frames, aspect, video, offset, title: state.file.name });
   } catch (err) {
-    if (err.name === 'AbortError') showError('Analysis cancelled.', 'info');
+    if (err.name === 'AbortError') showError(t('Analysis cancelled.'), 'info');
     else {
       console.error(err);
-      showError(err.message || 'Something went wrong while analyzing the video.');
+      showError(t(err.message || 'Something went wrong while analyzing the video.'));
     }
   } finally {
     $('#analyzeBtn').disabled = false;
@@ -208,7 +261,7 @@ function setProgress(p, text) {
 async function runDemo(kind) {
   const d = kind === 'shooting' ? demoShooting() : kind === 'jump' ? demoJump() : demoDribbling();
   const session = analyzeSession(d.frames, { mode: d.mode, jumpType: d.jumpType, heightCm: d.athlete?.heightCm });
-  if (session.error) return showError(session.error);
+  if (session.error) return showError(t(session.error));
   await finishSession(session, { frames: d.frames, aspect: d.aspect, video: null, offset: 0, title: d.label, demo: true });
 }
 $('#demoShoot').onclick = () => runDemo('shooting');
@@ -245,7 +298,7 @@ async function captureKeyframes(session) {
     for (const r of session.reps) {
       const items = [];
       for (const e of r.events.filter((x) => !skip.has(x.type))) {
-        items.push({ label: `${e.label} · ${e.t.toFixed(2)}s`, src: await state.player.snapshot(e.t, 260) });
+        items.push({ type: e.type, event: e.label, t: e.t, src: await state.player.snapshot(e.t, 260) });
       }
       out.push({ rep: r.label, items });
     }
@@ -253,7 +306,7 @@ async function captureKeyframes(session) {
     const ev = session.reps[0].events;
     const pick = [0, Math.floor(ev.length / 2), ev.length - 1].map((i) => ev[i]).filter(Boolean);
     const items = [];
-    for (const e of pick) items.push({ label: `${e.label} · ${e.t.toFixed(2)}s`, src: await state.player.snapshot(e.t, 260) });
+    for (const e of pick) items.push({ type: e.type, event: e.label, t: e.t, src: await state.player.snapshot(e.t, 260) });
     out.push({ rep: 'Dribble snapshots', items });
   }
   state.player.seek(was);
@@ -276,8 +329,8 @@ function previousOf(session) {
 function renderReport(session, { keepTab = false } = {}) {
   $('#reportEmpty').hidden = true;
   $('#reportBody').hidden = false;
-  $('#repMode').textContent = `${MODES[session.mode].label}${session.demo ? ' · sample data' : ''}`;
-  $('#repTitle').textContent = session.title || 'Session';
+  $('#repMode').textContent = `${modeLabel(session.mode)}${session.demo ? ` · ${t('sample data')}` : ''}`;
+  $('#repTitle').textContent = t(session.title || 'Session');
   if (!keepTab) { setTab('interactive'); state.rep = 0; }
 
   // KPIs
@@ -285,12 +338,12 @@ function renderReport(session, { keepTab = false } = {}) {
   const prev = previousOf(session);
   const delta = prev && S.overall != null && prev.summary.overall != null ? S.overall - prev.summary.overall : null;
   $('#kpis').innerHTML = `
-    <div class="kpi ring-kpi">${ring(S.overall, 92)}<div><div class="eyebrow">${session.mode === 'jump' ? 'Technique' : 'Overall'}</div><b>${esc(S.grade.label)}</b>
-      ${delta != null ? `<div class="delta ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta)} vs last session</div>` : ''}</div></div>
-    ${session.mode === 'jump' ? jumpKpis(session, prev) : `<div class="kpi"><div class="eyebrow">Form</div><b class="big">${S.formScore ?? '—'}</b></div>
-    <div class="kpi"><div class="eyebrow">Consistency</div><b class="big">${S.consistency ?? '—'}</b>${S.consistency == null ? `<span class="small muted">${session.mode === 'shooting' ? 'needs 2+ shots' : 'see rhythm metric'}</span>` : ''}</div>
-    <div class="kpi"><div class="eyebrow">${session.mode === 'shooting' ? 'Shots found' : 'Dribbles'}</div><b class="big">${session.mode === 'shooting' ? session.reps.length : session.reps[0].dribbleCount}</b></div>`}
-    <div class="kpi"><div class="eyebrow">Top focus</div><b>${esc(S.focus[0]?.issue || 'Keep it up!')}</b></div>`;
+    <div class="kpi ring-kpi">${ring(S.overall, 92)}<div><div class="eyebrow">${esc(t(session.mode === 'jump' ? 'Technique' : 'Overall'))}</div><b>${esc(t(S.grade.label))}</b>
+      ${delta != null ? `<div class="delta ${delta >= 0 ? 'up' : 'down'}">${esc(t('{n} vs last session', { n: `${delta >= 0 ? '▲' : '▼'} ${Math.abs(delta)}` }))}</div>` : ''}</div></div>
+    ${session.mode === 'jump' ? jumpKpis(session, prev) : `<div class="kpi"><div class="eyebrow">${esc(t('Form'))}</div><b class="big">${S.formScore ?? '—'}</b></div>
+    <div class="kpi"><div class="eyebrow">${esc(t('Consistency'))}</div><b class="big">${S.consistency ?? '—'}</b>${S.consistency == null ? `<span class="small muted">${esc(t(session.mode === 'shooting' ? 'needs 2+ shots' : 'see rhythm metric'))}</span>` : ''}</div>
+    <div class="kpi"><div class="eyebrow">${esc(t(session.mode === 'shooting' ? 'Shots found' : 'Dribbles'))}</div><b class="big">${session.mode === 'shooting' ? session.reps.length : session.reps[0].dribbleCount}</b></div>`}
+    <div class="kpi"><div class="eyebrow">${esc(t('Top focus'))}</div><b>${esc(t(S.focus[0]?.issue || 'Keep it up!'))}</b></div>`;
 
   $('#perfCard').hidden = !(session.mode === 'jump' && S.performance);
   if (session.mode === 'jump' && S.performance) $('#perfCard').innerHTML = dunkMeter(S.performance);
@@ -307,8 +360,8 @@ function renderReport(session, { keepTab = false } = {}) {
     $('#player').hidden = true;
     $('#noPlayer').hidden = false;
     $('#noPlayer').innerHTML = (session.keyframes?.length
-      ? `<div class="kf-grid">${session.keyframes.flatMap((k) => k.items.map((it) => `<figure><img src="${it.src}" alt=""/><figcaption>${esc(k.rep)} · ${esc(it.label)}</figcaption></figure>`)).join('')}</div>`
-      : '') + '<p>The original video is not stored. Re-upload it to replay with the skeleton overlay.</p>';
+      ? `<div class="kf-grid">${session.keyframes.flatMap((k) => k.items.map((it) => `<figure><img src="${it.src}" alt=""/><figcaption>${esc(t(k.rep))} · ${esc(keyframeLabel(it))}</figcaption></figure>`)).join('')}</div>`
+      : '') + `<p>${esc(t('The original video is not stored. Re-upload it to replay with the skeleton overlay.'))}</p>`;
   }
 
   // Chart
@@ -320,11 +373,11 @@ function renderReport(session, { keepTab = false } = {}) {
     load: 'Load', set: 'Set point', release: 'Release', follow: 'Follow-through end', dribble: 'Dribble',
     bottom: 'Bottom of dip', takeoff: 'Take-off', peak: 'Peak', landing: 'Landing', absorb: 'Landing absorb',
   };
-  $('#eventLegend').innerHTML = evTypes.map((t) => `<span class="ev ev-${t}">${evLabel[t]}</span>`).join('');
+  $('#eventLegend').innerHTML = evTypes.map((ty) => `<span class="ev ev-${ty}">${esc(t(evLabel[ty]))}</span>`).join('');
 
   // Rep chips
   $('#repChips').innerHTML = session.reps.length > 1
-    ? session.reps.map((r, i) => `<button class="chip-btn ${i === state.rep ? 'active' : ''}" data-rep="${i}">${esc(r.label)}${r.height != null ? ` · ${esc(formatLen(r.height))}` : ''} <span class="pill ${scoreClass(r.score)}">${r.score ?? '—'}</span></button>`).join('')
+    ? session.reps.map((r, i) => `<button class="chip-btn ${i === state.rep ? 'active' : ''}" data-rep="${i}">${esc(t(r.label))}${r.height != null ? ` · ${esc(formatLen(r.height))}` : ''} <span class="pill ${scoreClass(r.score)}">${r.score ?? '—'}</span></button>`).join('')
     : '';
   $$('#repChips [data-rep]').forEach((b) => { b.onclick = () => selectRep(session, Number(b.dataset.rep), true); });
   selectRep(session, Math.min(state.rep, session.reps.length - 1), false);
@@ -336,10 +389,10 @@ function jumpKpis(session, prev) {
   const P = session.summary.performance;
   const pBest = prev?.summary.performance?.best;
   const d = P && pBest != null ? P.best - pBest : null;
-  return `<div class="kpi"><div class="eyebrow">Best jump</div><b class="big">${esc(formatLen(P?.best))}</b>
-      ${d != null ? `<div class="delta ${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '▲' : '▼'} ${esc(formatLen(Math.abs(d)))} vs last</div>` : ''}</div>
-    <div class="kpi"><div class="eyebrow">Average</div><b class="big">${esc(formatLen(P?.avg))}</b></div>
-    <div class="kpi"><div class="eyebrow">${P?.toDunk != null ? (P.toDunk <= 0 ? 'Dunk' : 'To dunk') : 'Jumps found'}</div><b class="big">${P?.toDunk != null ? (P.toDunk <= 0 ? '✓' : esc(formatLen(P.toDunk))) : session.reps.length}</b></div>`;
+  return `<div class="kpi"><div class="eyebrow">${esc(t('Best jump'))}</div><b class="big">${esc(formatLen(P?.best))}</b>
+      ${d != null ? `<div class="delta ${d >= 0 ? 'up' : 'down'}">${esc(t('{n} vs last', { n: `${d >= 0 ? '▲' : '▼'} ${formatLen(Math.abs(d))}` }))}</div>` : ''}</div>
+    <div class="kpi"><div class="eyebrow">${esc(t('Average'))}</div><b class="big">${esc(formatLen(P?.avg))}</b></div>
+    <div class="kpi"><div class="eyebrow">${esc(t(P?.toDunk != null ? (P.toDunk <= 0 ? 'Dunk' : 'To dunk') : 'Jumps found'))}</div><b class="big">${P?.toDunk != null ? (P.toDunk <= 0 ? '✓' : esc(formatLen(P.toDunk))) : session.reps.length}</b></div>`;
 }
 
 function selectRepAt(session, t) {
@@ -351,20 +404,20 @@ function selectRep(session, i, seek) {
   state.rep = i;
   const rep = session.reps[i];
   $$('#repChips [data-rep]').forEach((b) => b.classList.toggle('active', Number(b.dataset.rep) === i));
-  const defs = metricDefs(session);
+  const defs = localDefs(session);
   $('#metricCards').innerHTML = Object.entries(rep.metrics).map(([key, m]) => {
     const def = defs[key];
     const evType = rep.metricEvent[key];
     const ev = rep.events.find((e) => e.type === evType);
     const dir = def.ideal && m.score < 100 ? (m.value < def.ideal[0] ? def.low : def.high) : null;
     return `<div class="mcard">
-      <div class="mrow-head"><span class="mrow-label">${esc(def.label)}</span><span class="pill ${scoreClass(m.score)}">${m.score ?? 'info'}</span></div>
-      <div class="mrow-vals"><b>${esc(formatMetric(def, m.value))}</b><span class="muted small">${def.ideal ? `ideal ${esc(formatIdeal(def))}` : ''}</span></div>
+      <div class="mrow-head"><span class="mrow-label">${esc(def.label)}</span><span class="pill ${scoreClass(m.score)}">${m.score ?? esc(t('info'))}</span></div>
+      <div class="mrow-vals"><b>${esc(formatMetric(def, m.value))}</b><span class="muted small">${def.ideal ? esc(t('ideal {v}', { v: formatIdeal(def) })) : ''}</span></div>
       ${rangeBar(def, m.value)}
-      ${dir ? `<p class="small mtip">${esc(dir.issue)}: ${esc(dir.tip)}</p>` : ''}
-      ${ev && state.player ? `<button class="link small" data-seek="${ev.t}">▶ View ${esc(ev.label.toLowerCase())} (${ev.t.toFixed(2)}s)</button>` : ''}
+      ${dir ? `<p class="small mtip">${esc(dir.issue)}${getLang() === 'zh' ? '：' : ': '}${esc(dir.tip)}</p>` : ''}
+      ${ev && state.player ? `<button class="link small" data-seek="${ev.t}">▶ ${esc(t('View {e} ({t}s)', { e: getLang() === 'zh' ? t(ev.label) : ev.label.toLowerCase(), t: ev.t.toFixed(2) }))}</button>` : ''}
     </div>`;
-  }).join('') || '<p class="muted">No measurable metrics for this view.</p>';
+  }).join('') || `<p class="muted">${esc(t('No measurable metrics for this view.'))}</p>`;
   $$('#metricCards [data-seek]').forEach((b) => {
     b.onclick = () => { const t = Number(b.dataset.seek); state.player?.pause(); state.player?.seek(t); state.chart.setPlayhead(t); };
   });
@@ -420,16 +473,16 @@ function renderProgress() {
     ? sessions.map((s) => `<div class="session">
         ${ring(s.summary.overall, 48)}
         <div class="session-main">
-          <b>${esc(s.title || 'Session')}</b>
-          <span class="small muted">${esc(MODES[s.mode].label)} · ${new Date(s.createdAt).toLocaleString()} · ${s.mode === 'jump' ? `${s.reps.length} jumps · best ${esc(formatLen(s.summary.performance?.best))}` : `${s.reps.length} ${s.mode === 'shooting' ? 'shots' : 'set'}`}</span>
-          ${s.summary.focus[0] ? `<span class="small">Focus: ${esc(s.summary.focus[0].issue)}</span>` : ''}
+          <b>${esc(t(s.title || 'Session'))}</b>
+          <span class="small muted">${esc(modeLabel(s.mode))} · ${new Date(s.createdAt).toLocaleString(locale())} · ${esc(s.mode === 'jump' ? t('{n} jumps · best {b}', { n: s.reps.length, b: formatLen(s.summary.performance?.best) }) : t(s.mode === 'shooting' ? '{n} shots' : '{n} set', { n: s.reps.length }))}</span>
+          ${s.summary.focus[0] ? `<span class="small">${esc(t('Focus: {v}', { v: t(s.summary.focus[0].issue) }))}</span>` : ''}
         </div>
         <div class="session-actions">
-          <button class="btn small" data-open="${s.id}">Open</button>
-          <button class="btn ghost small" data-del="${s.id}" aria-label="Delete session">✕</button>
+          <button class="btn small" data-open="${s.id}">${esc(t('Open'))}</button>
+          <button class="btn ghost small" data-del="${s.id}" aria-label="${esc(t('Delete session'))}">✕</button>
         </div>
       </div>`).join('')
-    : '<p class="muted">No saved sessions yet. Every video you analyze is saved here (in this browser only).</p>';
+    : `<p class="muted">${esc(t('No saved sessions yet. Every video you analyze is saved here (in this browser only).'))}</p>`;
   $$('[data-open]').forEach((b) => {
     b.onclick = () => {
       const s = getSession(b.dataset.open);
@@ -441,11 +494,13 @@ function renderProgress() {
     };
   });
   $$('[data-del]').forEach((b) => {
-    b.onclick = () => { if (confirm('Delete this session?')) { deleteSession(b.dataset.del); renderProgress(); } };
+    b.onclick = () => { if (confirm(t('Delete this session?'))) { deleteSession(b.dataset.del); renderProgress(); } };
   });
 }
-$('#clearHistory').onclick = () => { if (confirm('Delete all saved sessions?')) { clearSessions(); renderProgress(); } };
+$('#clearHistory').onclick = () => { if (confirm(t('Delete all saved sessions?'))) { clearSessions(); renderProgress(); } };
 
+setLang(initialLang());
 loadProfile();
+applyStaticText();
 syncModeOptions();
 route();

@@ -3,6 +3,7 @@ import {
 } from 'chart.js';
 
 import { getUnits, formatLen } from './metrics.js';
+import { t, locale } from './i18n.js';
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Legend, Filler);
 
@@ -26,7 +27,7 @@ const markers = {
       ctx.fillRect(x0, a.top, x1 - x0, a.bottom - a.top);
       ctx.fillStyle = css('--muted');
       ctx.font = '11px system-ui, sans-serif';
-      if (opts.reps.length > 1) ctx.fillText(r.label, x0 + 4, a.top + 12);
+      if (opts.reps.length > 1) ctx.fillText(t(r.label), x0 + 4, a.top + 12);
     }
     for (const e of opts.events || []) {
       const px = x.getPixelForValue(e.t);
@@ -51,7 +52,7 @@ const markers = {
 export function timelineChart(canvas, session, { onSeek } = {}) {
   const { series, chartSeries } = session;
   const datasets = chartSeries.map((cs, i) => ({
-    label: cs.label,
+    label: t(cs.label),
     data: series.t.map((t, k) => ({ x: t, y: series[cs.key][k] })),
     yAxisID: cs.axis,
     borderColor: css(SERIES_COLORS[i % 3]),
@@ -130,10 +131,10 @@ export function progressChart(canvas, sessions) {
     type: 'line',
     data: {
       datasets: [
-        { label: 'Shooting', data: byMode.shooting, borderColor: css('--accent'), backgroundColor: css('--accent'), tension: 0.2, pointRadius: 4 },
-        { label: 'Dribbling', data: byMode.dribbling, borderColor: css('--c1'), backgroundColor: css('--c1'), tension: 0.2, pointRadius: 4 },
-        { label: 'Jump technique', data: byMode.jump, borderColor: css('--c2'), backgroundColor: css('--c2'), tension: 0.2, pointRadius: 4, borderDash: [5, 4] },
-        { label: `Best jump (${getUnits()})`, data: heights, yAxisID: 'h', borderColor: css('--c3'), backgroundColor: css('--c3'), tension: 0.2, pointRadius: 5, borderWidth: 3 },
+        { label: t('Shooting'), data: byMode.shooting, borderColor: css('--accent'), backgroundColor: css('--accent'), tension: 0.2, pointRadius: 4 },
+        { label: t('Dribbling'), data: byMode.dribbling, borderColor: css('--c1'), backgroundColor: css('--c1'), tension: 0.2, pointRadius: 4 },
+        { label: t('Jump technique'), data: byMode.jump, borderColor: css('--c2'), backgroundColor: css('--c2'), tension: 0.2, pointRadius: 4, borderDash: [5, 4] },
+        { label: t('Best jump ({u})', { u: getUnits() }), data: heights, yAxisID: 'h', borderColor: css('--c3'), backgroundColor: css('--c3'), tension: 0.2, pointRadius: 5, borderWidth: 3 },
       ].filter((d) => d.data.length),
     },
     options: {
@@ -142,16 +143,16 @@ export function progressChart(canvas, sessions) {
       maintainAspectRatio: false,
       parsing: false,
       scales: {
-        x: { type: 'linear', grid: { color: grid }, ticks: { color: tick, maxTicksLimit: 6, callback: (v) => new Date(v).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) } },
-        y: { min: 0, max: 100, title: { display: true, text: 'Score', color: tick }, grid: { color: grid }, ticks: { color: tick } },
-        ...(heights.length ? { h: { position: 'right', beginAtZero: false, title: { display: true, text: `Jump (${getUnits()})`, color: tick }, grid: { drawOnChartArea: false }, ticks: { color: tick } } } : {}),
+        x: { type: 'linear', grid: { color: grid }, ticks: { color: tick, maxTicksLimit: 6, callback: (v) => new Date(v).toLocaleDateString(locale(), { month: 'short', day: 'numeric' }) } },
+        y: { min: 0, max: 100, title: { display: true, text: t('Score'), color: tick }, grid: { color: grid }, ticks: { color: tick } },
+        ...(heights.length ? { h: { position: 'right', beginAtZero: false, title: { display: true, text: t('Jump ({u})', { u: getUnits() }), color: tick }, grid: { drawOnChartArea: false }, ticks: { color: tick } } } : {}),
       },
       plugins: {
         legend: { labels: { color: css('--text'), usePointStyle: true } },
         tooltip: {
           callbacks: {
-            title: (it) => new Date(it[0].parsed.x).toLocaleString(),
-            label: (it) => (it.dataset.yAxisID === 'h' ? `Best jump: ${formatLen(it.parsed.y / k)}` : `${it.dataset.label}: ${it.parsed.y}`),
+            title: (it) => new Date(it[0].parsed.x).toLocaleString(locale()),
+            label: (it) => (it.dataset.yAxisID === 'h' ? t('Best jump: {v}', { v: formatLen(it.parsed.y / k) }) : `${it.dataset.label}: ${it.parsed.y}`),
           },
         },
       },

@@ -142,3 +142,29 @@ test('jump: approach away from the camera (floor line moves) with athlete walkin
   [52, 41, 49].forEach((h, i) => assert.ok(Math.abs(s.reps[i].height - h) < 4, `jump ${i + 1}: ${s.reps[i].height.toFixed(1)}`));
   assert.ok(!s.warnings.some((w) => w.includes('only detected')), 'walking into frame is not a coverage problem');
 });
+
+// Camera-height scenarios: perspective is simulated by scaling the scene about
+// the horizon point; scale k > 1 = closer to the camera.
+function perspective(frames, { horizonY, k0, k1 }) {
+  const T = frames[frames.length - 1].t;
+  return frames.map((f) => {
+    const k = k0 + (k1 - k0) * (f.t / T);
+    return { t: f.t, lm: f.lm && f.lm.map((p) => ({ ...p, x: 0.89 + (p.x - 0.89) * k, y: horizonY + (p.y - horizonY) * k })) };
+  });
+}
+
+for (const [name, cam] of [
+  ['eye-level camera, running toward it', { horizonY: 0.45, k0: 0.75, k1: 1.05 }],
+  ['eye-level camera, running away from it', { horizonY: 0.45, k0: 1.05, k1: 0.75 }],
+  ['camera on the floor, running toward it', { horizonY: 0.88, k0: 0.7, k1: 1.0 }],
+  ['camera raised above the court (like a stand), running away', { horizonY: 0.1, k0: 1.0, k1: 0.75 }],
+]) {
+  test(`jump height: ${name}`, () => {
+    const s = analyzeSession(perspective(demoJump().frames, cam), { mode: 'jump', jumpType: 'approach', heightCm: 185 });
+    assert.ok(!s.error, s.error);
+    assert.equal(s.reps.length, 3);
+    [52, 41, 49].forEach((h, i) => assert.ok(Math.abs(s.reps[i].height - h) < 4, `jump ${i + 1}: ${s.reps[i].height.toFixed(1)} vs ${h}`));
+    // Hip-rise cross-check still lands near the flight-time height despite the size change.
+    assert.ok(Math.abs(s.reps[0].metrics.hipRise.value - s.reps[0].height) < 10, `hipRise ${s.reps[0].metrics.hipRise.value.toFixed(1)}`);
+  });
+}
