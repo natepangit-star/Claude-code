@@ -217,14 +217,19 @@ export function computeFeatures(frames, hand = 'right') {
 }
 
 export function detectView(frames) {
+  const m = viewRatio(frames);
+  // Facing the camera, shoulder width is ~0.6–0.9 of torso length; side-on it collapses.
+  return m != null && m >= 0.42 ? 'front' : 'side';
+}
+
+/** Median shoulder width / torso length: ~0.1–0.3 side-on, ~0.6+ facing (or back to) the camera. */
+export function viewRatio(frames) {
   const ratios = frames.map((f) => {
     const l = pt(f.lm, LM.L_SH), r = pt(f.lm, LM.R_SH);
     const t = dist(mid(l, r), mid(pt(f.lm, LM.L_HIP), pt(f.lm, LM.R_HIP)));
     return l && r && t ? dist(l, r) / t : null;
   });
-  const m = median(ratios);
-  // Facing the camera, shoulder width is ~0.6–0.9 of torso length; side-on it collapses.
-  return m != null && m >= 0.42 ? 'front' : 'side';
+  return median(ratios);
 }
 
 export function detectShootingHand(frames) {
@@ -583,13 +588,24 @@ function analyzeJump(frames, view, opts) {
     const land = jp.b + 1;
     const prevEnd = k > 0 ? jumps[k - 1].b + 1 : 0;
     const winStart = Math.max(prevEnd, take - sec(approach ? 0.6 : 1.0));
-    let bottom = argBy(F.hipY, winStart, take, (x, y) => x > y);
+    // Hip height above the feet in torso lengths: independent of distance to the camera.
+    const hipAbove = (k) => (foot[k] != null && F.hipY[k] != null ? (foot[k] - F.hipY[k]) / scale[k] : null);
+    const lowestHip = (a0, b0) => {
+      let best = -1;
+      for (let k = a0; k <= b0; k++) {
+        const v = hipAbove(k);
+        if (v != null && (best < 0 || v < hipAbove(best))) best = k;
+      }
+      return best;
+    };
+    let bottom = lowestHip(winStart, take);
     if (bottom < 0) bottom = Math.max(0, take - 1);
     let peak = argBy(F.hipY, jp.a, jp.b, (x, y) => x < y);
     if (peak < 0) peak = Math.round((jp.a + jp.b) / 2);
     const nextStart = k < jumps.length - 1 ? jumps[k + 1].a - 1 : n - 1;
-    const absorbEnd = Math.min(nextStart, land + sec(0.45), n - 1);
-    let absorb = argBy(F.hipY, land, absorbEnd, (x, y) => x > y);
+    // Peak knee bend from absorbing a landing happens within ~0.25 s; later is a deliberate crouch.
+    const absorbEnd = Math.min(nextStart, land + sec(0.25), n - 1);
+    let absorb = lowestHip(land, absorbEnd);
     if (absorb < 0) absorb = land;
     const ext = argBy(F.knee, Math.max(0, take - sec(0.1)), take, (x, y) => x > y);
     let armPk = -1;
@@ -746,6 +762,12 @@ export function analyzeSession(frames, opts = {}) {
   if (res.error) return { error: res.error };
 
   const warnings = [...res.warnings];
+  const vr = viewRatio(valid);
+  if (vr != null && vr > 0.3 && vr < 0.55 && (!opts.view || opts.view === 'auto')) {
+    warnings.push(mode === 'jump'
+      ? 'The camera was at an angle to you, so knee and hip angles are approximate. Jump height and timing are not affected. For technique feedback, film exactly side-on.'
+      : 'The camera was at an angle to you, so joint angles are approximate. Film exactly side-on (or set the camera angle manually) for precise angles.');
+  }
   // Count coverage from the first to the last detection (walking into frame is fine).
   const firstSeen = frames.findIndex((f) => f.lm);
   const lastSeen = frames.length - 1 - [...frames].reverse().findIndex((f) => f.lm);

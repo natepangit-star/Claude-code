@@ -76,7 +76,7 @@ export function timelineChart(canvas, session, { onSeek } = {}) {
       parsing: false,
       interaction: { mode: 'index', intersect: false },
       scales: {
-        x: { type: 'linear', min: 0, max: series.t[series.t.length - 1], grid: { color: grid }, ticks: { color: tick, callback: (v) => `${v}s` } },
+        x: { type: 'linear', min: 0, max: series.t[series.t.length - 1], grid: { color: grid }, ticks: { color: tick, callback: (v) => `${Number(v.toFixed(2))}s` } },
         ...(hasDeg ? { deg: { position: 'left', min: 40, max: 190, grid: { color: grid }, ticks: { color: tick, callback: (v) => `${v}°` } } } : {}),
         rel: { position: hasDeg ? 'right' : 'left', grid: { drawOnChartArea: !hasDeg, color: grid }, ticks: { color: tick } },
       },
