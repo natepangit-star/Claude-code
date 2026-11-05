@@ -19,6 +19,10 @@ npm run build      # static site in dist/ (host anywhere)
 
 No video handy? Use **Demo: vertical jumps**, **Demo: jump shots** or **Demo: dribbling** on the Analyze page to explore a full report with sample data.
 
+## Languages
+
+English and Simplified Chinese (简体中文). Use the **中文 / EN** button in the top bar. It defaults to Chinese when the phone or browser is set to Chinese. Translations live in `src/zh.js`, keyed by the English text, and a test fails if any user-facing string is missing a translation.
+
 ## Use it on your phone
 
 The app is a static site, so any static host works. Videos are still processed on the phone itself.

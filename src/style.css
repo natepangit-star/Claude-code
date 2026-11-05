@@ -156,3 +156,8 @@ select, input[type=number] { font: inherit; color: var(--text); background: var(
 .unit-label { color: var(--muted); font-weight: 600; min-width: 18px; }
 .ev-bottom::before { background: var(--c2); } .ev-takeoff::before { background: var(--accent); }
 .ev-peak::before { background: var(--c3); } .ev-landing::before { background: var(--c1); }
+
+/* upload bar + language button */
+.file-bar { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lang-btn { font-weight: 700; }

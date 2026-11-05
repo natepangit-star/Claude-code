@@ -10,7 +10,8 @@ const cache = {};
 let clock = 0; // detectForVideo needs strictly increasing timestamps per landmarker
 
 async function getLandmarker(quality) {
-  if (cache[quality]) return cache[quality];
+  const key = quality;
+  if (cache[key]) return cache[key];
   const wasmBase = new URL('wasm', new URL(import.meta.env.BASE_URL, window.location.href)).href;
   const fileset = await FilesetResolver.forVisionTasks(wasmBase);
   const make = (delegate) => PoseLandmarker.createFromOptions(fileset, {
@@ -22,11 +23,11 @@ async function getLandmarker(quality) {
     minTrackingConfidence: 0.5,
   });
   try {
-    cache[quality] = await make('GPU');
+    cache[key] = await make('GPU');
   } catch {
-    cache[quality] = await make('CPU');
+    cache[key] = await make('CPU');
   }
-  return cache[quality];
+  return cache[key];
 }
 
 function seek(video, t) {
@@ -79,7 +80,9 @@ export function loadVideo(video, file) {
  * Extract pose landmarks for [start, end] seconds of the loaded video.
  * Returns frames in video-height units (x scaled by aspect ratio).
  */
-export async function extractPoses(video, { quality = 'fast', fps = 15, start = 0, end = Infinity, onStatus, onProgress, signal } = {}) {
+export async function extractPoses(video, {
+  quality = 'fast', fps = 15, start = 0, end = Infinity, onStatus, onProgress, signal,
+} = {}) {
   onStatus?.('Loading pose model…');
   const landmarker = await getLandmarker(quality);
   const aspect = video.videoWidth / video.videoHeight || 16 / 9;
@@ -89,18 +92,19 @@ export async function extractPoses(video, { quality = 'fast', fps = 15, start = 
   if (t1 - t0 < 0.5) throw new Error('The selected part of the video is too short (need at least 0.5 s).');
   const frames = [];
   const step = 1 / fps;
+  // Timestamps follow video time so the tracker's smoothing filter sees real motion speed.
+  const base = clock + 1000;
   onStatus?.('Tracking your movement…');
   for (let t = t0; t <= t1 + 1e-6; t += step) {
     if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
     await seek(video, Math.min(t, Math.max(0, duration - 0.001)));
-    clock = Math.max(clock + 1, Math.round(performance.now()));
+    clock = base + Math.round((t - t0) * 1000);
     const res = landmarker.detectForVideo(video, clock);
     const raw = res.landmarks?.[0];
-    frames.push({
-      t: t - t0,
-      lm: raw ? raw.map((p) => ({ x: p.x * aspect, y: p.y, v: p.visibility ?? 1 })) : null,
-    });
+    const lm = raw ? raw.map((p) => ({ x: p.x * aspect, y: p.y, v: p.visibility ?? 1 })) : null;
+    frames.push({ t: t - t0, lm });
     onProgress?.((t - t0) / (t1 - t0));
   }
+  clock = Math.max(clock, base + Math.round((t1 - t0) * 1000) + 1);
   return { frames, aspect, offset: t0 };
 }

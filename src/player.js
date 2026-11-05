@@ -1,6 +1,7 @@
 // A small player that shows either the uploaded video or (for demo data)
 // a rendered stick figure, with the detected skeleton overlaid.
 import { drawSkeleton, nearestFrame } from './skeleton.js';
+import { t } from './i18n.js';
 
 export class Player {
   /**
@@ -25,13 +26,13 @@ export class Player {
         <canvas class="player-canvas"></canvas>
       </div>
       <div class="player-controls">
-        <button class="btn icon play" aria-label="Play">▶</button>
-        <input class="scrub" type="range" min="0" max="${this.duration}" step="0.01" value="0" aria-label="Seek" />
+        <button class="btn icon play" aria-label="${t('Play')}">▶</button>
+        <input class="scrub" type="range" min="0" max="${this.duration}" step="0.01" value="0" aria-label="${t('Seek')}" />
         <span class="time">0.00s</span>
-        <select class="speed" aria-label="Playback speed">
+        <select class="speed" aria-label="${t('Playback speed')}">
           <option value="0.25">0.25×</option><option value="0.5" selected>0.5×</option><option value="1">1×</option>
         </select>
-        <label class="toggle"><input type="checkbox" class="skel" checked /> Skeleton</label>
+        <label class="toggle"><input type="checkbox" class="skel" checked /> ${t('Skeleton')}</label>
       </div>`;
     this.stage = root.querySelector('.player-stage');
     this.canvas = root.querySelector('canvas');
@@ -95,7 +96,7 @@ export class Player {
     if (this.t >= this.duration - 0.01) this.seek(0);
     this.playing = true;
     this.btn.textContent = '❚❚';
-    this.btn.setAttribute('aria-label', 'Pause');
+    this.btn.setAttribute('aria-label', t('Pause'));
     if (this.video) {
       this.video.play();
       const loop = () => { if (!this.playing) return; this.#fromVideo(); requestAnimationFrame(loop); };
@@ -118,7 +119,7 @@ export class Player {
   pause() {
     this.playing = false;
     this.btn.textContent = '▶';
-    this.btn.setAttribute('aria-label', 'Play');
+    this.btn.setAttribute('aria-label', t('Play'));
     this.video?.pause();
   }
 

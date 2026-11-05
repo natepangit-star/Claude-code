@@ -1,6 +1,7 @@
 // The static report: one HTML builder used both for the in-app "Summary" tab
 // and for the downloadable stand-alone HTML file.
-import { MODES, formatMetric, formatIdeal, metricDefs, formatLen } from './metrics.js';
+import { formatMetric, formatIdeal, localDefs, formatLen, modeLabel } from './metrics.js';
+import { t, locale, getLang } from './i18n.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -15,7 +16,7 @@ export function ring(score, size = 120) {
   const r = size / 2 - 9;
   const c = 2 * Math.PI * r;
   const p = score == null ? 0 : Math.max(0, Math.min(100, score)) / 100;
-  return `<svg class="ring ${scoreClass(score)}" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="Score ${score ?? 'n/a'} out of 100">
+  return `<svg class="ring ${scoreClass(score)}" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="${esc(t('Score {s} out of 100', { s: score ?? '—' }))}">
     <circle cx="${size / 2}" cy="${size / 2}" r="${r}" class="ring-bg" stroke-width="10" fill="none"/>
     <circle cx="${size / 2}" cy="${size / 2}" r="${r}" class="ring-fg" stroke-width="10" fill="none" stroke-linecap="round"
       stroke-dasharray="${(c * p).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 ${size / 2} ${size / 2})"/>
@@ -43,31 +44,42 @@ export function rangeBar(def, mean, values = []) {
 
 function fmtDate(iso) {
   try {
-    return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    return new Date(iso).toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' });
   } catch { return iso; }
+}
+
+/** Focus item text in the current language (falls back to the stored English). */
+function focusText(f) {
+  return { issue: t(f.issue), label: t(f.label), tip: t(f.tip), drill: t(f.drill), why: t(f.why) };
+}
+
+/** "3 jumps", "1 shot"… */
+export function countWord(mode, n) {
+  const one = mode === 'shooting' ? 'shot' : mode === 'jump' ? 'jump' : 'set';
+  const word = n === 1 ? one : `${one}s`;
+  return getLang() === 'zh' ? `${n} ${t(word)}` : `${n} ${word}`;
 }
 
 /**
  * @param session analysis result
- * @param {{keyframes?: Array<{rep:string, items:Array<{label:string, src:string}>}>, timelineImg?: string, title?: string}} extra
+ * @param {{keyframes?: Array, timelineImg?: string, title?: string}} extra
  */
 export function summaryHtml(session, extra = {}) {
   const S = session.summary;
-  const defs = metricDefs(session);
+  const defs = localDefs(session);
   const isShot = session.mode === 'shooting';
   const isJump = session.mode === 'jump';
-  const repWord = isShot ? 'shots' : isJump ? 'jumps' : 'sets';
   const perf = S.performance;
   const metricRows = Object.entries(S.metrics).map(([key, m]) => {
     const def = defs[key];
     return `<div class="mrow">
       <div class="mrow-head">
         <span class="mrow-label">${esc(def.label)}</span>
-        <span class="pill ${scoreClass(m.score)}">${m.score ?? 'info'}</span>
+        <span class="pill ${scoreClass(m.score)}">${m.score ?? esc(t('info'))}</span>
       </div>
       <div class="mrow-vals">
         <span><b>${esc(formatMetric(def, m.mean))}</b>${m.sd != null && m.n > 1 ? ` <span class="muted">± ${esc(def.unit === 'cm' ? formatLen(m.sd) : formatMetric({ ...def, format: null, unit: def.unit }, m.sd))}</span>` : ''}</span>
-        <span class="muted">${def.ideal ? `ideal ${esc(formatIdeal(def))}` : ''}</span>
+        <span class="muted">${def.ideal ? esc(t('ideal {v}', { v: formatIdeal(def) })) : ''}</span>
       </div>
       ${rangeBar(def, m.mean, m.n > 1 ? m.values : [])}
     </div>`;
@@ -76,102 +88,118 @@ export function summaryHtml(session, extra = {}) {
   const maxH = isJump ? Math.max(...session.reps.map((r) => r.height || 0), 1) : 0;
   const heightBars = isJump ? `
     <section class="card">
-      <h3>Height by jump</h3>
+      <h3>${esc(t('Height by jump'))}</h3>
       <div class="bars">
-        ${session.reps.map((r) => `<div class="bar-row"><span class="bar-label">${esc(r.label)}</span>
+        ${session.reps.map((r) => `<div class="bar-row"><span class="bar-label">${esc(t(r.label))}</span>
           <span class="bar-track"><span class="bar-fill jump${r.height === perf?.best ? ' best' : ''}" style="width:${((100 * (r.height || 0)) / maxH).toFixed(1)}%"></span></span>
           <span class="bar-val wide">${esc(formatLen(r.height))}</span></div>`).join('')}
       </div>
-      <p class="muted small">Technique score per jump: ${session.reps.map((r) => `${esc(r.label)} <b>${r.score ?? '—'}</b>`).join(' · ')}</p>
+      <p class="muted small">${t('Technique score per jump: {v}', { v: session.reps.map((r) => `${esc(t(r.label))} <b>${r.score ?? '—'}</b>`).join(' · ') })}</p>
     </section>` : '';
   const repBars = !isJump && session.reps.length > 1 ? `
     <section class="card">
-      <h3>Score by ${isShot ? 'shot' : 'set'}</h3>
+      <h3>${esc(t(isShot ? 'Score by shot' : 'Score by set'))}</h3>
       <div class="bars">
-        ${session.reps.map((r) => `<div class="bar-row"><span class="bar-label">${esc(r.label)}</span>
+        ${session.reps.map((r) => `<div class="bar-row"><span class="bar-label">${esc(t(r.label))}</span>
           <span class="bar-track"><span class="bar-fill ${scoreClass(r.score)}" style="width:${r.score ?? 0}%"></span></span>
           <span class="bar-val">${r.score ?? '—'}</span></div>`).join('')}
       </div>
     </section>` : '';
 
-  const focus = S.focus.length ? S.focus.map((f, i) => `
+  const focus = S.focus.length ? S.focus.map((f, i) => {
+    const x = focusText(f);
+    return `
     <div class="focus">
-      <div class="focus-head"><span class="focus-n">${i + 1}</span><b>${esc(f.issue)}</b><span class="pill ${scoreClass(f.score)}">${f.score}</span></div>
-      <p class="muted small">${esc(f.label)}${f.worstShot ? ` · most visible on ${esc(f.worstShot)}` : ''}</p>
-      <p>${esc(f.tip)}</p>
-      <p class="drill"><span>Drill</span>${esc(f.drill)}</p>
-    </div>`).join('') : '<p>No major issues found. Keep stacking quality reps and re-test from a new spot or a longer distance.</p>';
+      <div class="focus-head"><span class="focus-n">${i + 1}</span><b>${esc(x.issue)}</b><span class="pill ${scoreClass(f.score)}">${f.score}</span></div>
+      <p class="muted small">${esc(x.label)}${f.worstShot ? ` · ${esc(t('most visible on {v}', { v: t(f.worstShot) }))}` : ''}</p>
+      <p>${esc(x.tip)}</p>
+      <p class="drill"><span>${esc(t('Drill'))}</span>${esc(x.drill)}</p>
+    </div>`;
+  }).join('') : `<p>${esc(t('No major issues found. Keep stacking quality reps and re-test from a new spot or a longer distance.'))}</p>`;
 
   const strengths = S.strengths.length
-    ? `<ul class="checks">${S.strengths.map((s) => `<li><b>${esc(s.label)}</b><span class="muted small">${esc(s.why)}</span></li>`).join('')}</ul>`
-    : '<p class="muted">Strengths will show here once a metric is consistently in the ideal range.</p>';
+    ? `<ul class="checks">${S.strengths.map((x) => `<li><b>${esc(t(x.label))}</b><span class="muted small">${esc(t(x.why))}</span></li>`).join('')}</ul>`
+    : `<p class="muted">${esc(t('Strengths will show here once a metric is consistently in the ideal range.'))}</p>`;
 
-  const plan = `<ol class="plan">${S.plan.map((d) => `<li><b>${esc(d.day)}</b><ul>${d.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></li>`).join('')}</ol>`;
+  const plan = `<ol class="plan">${S.plan.map((d) => `<li><b>${esc(t(d.day))}</b><ul>${d.items.map((x) => `<li>${esc(t(x))}</li>`).join('')}</ul></li>`).join('')}</ol>`;
 
   const kf = extra.keyframes?.length ? `
     <section class="card wide">
-      <h3>Key positions</h3>
-      ${extra.keyframes.map((k) => `<div class="kf-rep"><div class="muted small">${esc(k.rep)}</div><div class="kf-row">
-        ${k.items.map((it) => `<figure><img src="${it.src}" alt="${esc(k.rep)} ${esc(it.label)}"/><figcaption>${esc(it.label)}</figcaption></figure>`).join('')}
+      <h3>${esc(t('Key positions'))}</h3>
+      ${extra.keyframes.map((k) => `<div class="kf-rep"><div class="muted small">${esc(t(k.rep))}</div><div class="kf-row">
+        ${k.items.map((it) => `<figure><img src="${it.src}" alt="${esc(t(k.rep))} ${esc(keyframeLabel(it))}"/><figcaption>${esc(keyframeLabel(it))}</figcaption></figure>`).join('')}
       </div></div>`).join('')}
     </section>` : '';
 
-  const timeline = extra.timelineImg ? `<section class="card wide"><h3>Movement timeline</h3><img class="timeline-img" src="${extra.timelineImg}" alt="Joint angle timeline"/></section>` : '';
+  const timeline = extra.timelineImg ? `<section class="card wide"><h3>${esc(t('Movement timeline'))}</h3><img class="timeline-img" src="${extra.timelineImg}" alt="${esc(t('Joint angle timeline'))}"/></section>` : '';
 
   const warnings = session.warnings.length
-    ? `<div class="warn">${session.warnings.map((w) => `<p>${esc(w)}</p>`).join('')}</div>` : '';
+    ? `<div class="warn">${session.warnings.map((w) => `<p>${esc(t(w))}</p>`).join('')}</div>` : '';
 
+  const repWordPlural = isShot ? 'shots' : isJump ? 'jumps' : 'sets';
   return `<div class="report">
     <header class="rep-head card wide">
       ${ring(S.overall)}
       <div class="rep-meta">
-        <div class="eyebrow">${esc(MODES[session.mode].label)}${extra.title ? ` · ${esc(extra.title)}` : ''}</div>
-        <h2>${esc(S.grade.label)} <span class="grade">${esc(S.grade.letter)}</span></h2>
+        <div class="eyebrow">${esc(modeLabel(session.mode))}${extra.title ? ` · ${esc(t(extra.title))}` : ''}</div>
+        <h2>${esc(t(S.grade.label))} <span class="grade">${esc(S.grade.letter)}</span></h2>
         <div class="chips">
-          <span class="chip">${session.reps.length} ${session.reps.length === 1 ? repWord.slice(0, -1) : repWord}${!isShot && session.reps[0]?.dribbleCount ? ` · ${session.reps[0].dribbleCount} dribbles` : ''}</span>
-          <span class="chip">${esc(session.view)} view</span>
-          ${isJump ? `<span class="chip">${perf?.jumpType === 'approach' ? 'approach jump' : 'standing jump'}</span>` : `<span class="chip">${esc(session.hand)} hand</span>`}
+          <span class="chip">${esc(countWord(session.mode, session.reps.length))}${!isShot && session.reps[0]?.dribbleCount ? ` · ${esc(t('{n} dribbles', { n: session.reps[0].dribbleCount }))}` : ''}</span>
+          <span class="chip">${esc(t(`${session.view} view`))}</span>
+          ${isJump ? `<span class="chip">${esc(t(perf?.jumpType === 'approach' ? 'approach jump' : 'standing jump'))}</span>` : `<span class="chip">${esc(t(`${session.hand} hand`))}</span>`}
           <span class="chip">${session.duration.toFixed(1)} s</span>
           <span class="chip">${esc(fmtDate(session.createdAt))}</span>
         </div>
         <div class="subscores">
-          <span>${isJump ? 'Technique' : 'Form'} <b>${S.formScore ?? '—'}</b></span>
-          ${S.consistency != null ? `<span>Consistency <b>${S.consistency}</b></span>` : ''}
+          <span>${esc(t(isJump ? 'Technique' : 'Form'))} <b>${S.formScore ?? '—'}</b></span>
+          ${S.consistency != null ? `<span>${esc(t('Consistency'))} <b>${S.consistency}</b></span>` : ''}
         </div>
       </div>
     </header>
     ${warnings}
     ${isJump && perf ? `<section class="card wide perf">${performanceHtml(perf)}</section>` : ''}
     <div class="grid">
-      <section class="card"><h3>Focus areas</h3>${focus}</section>
-      <section class="card"><h3>Strengths</h3>${strengths}</section>
-      <section class="card"><h3>Metrics</h3><div class="mlist">${metricRows}</div>
-        <p class="muted small">Orange marker = average${session.reps.length > 1 ? ', dots = individual ' + repWord : ''}. Shaded band = ideal range.</p></section>
+      <section class="card"><h3>${esc(t('Focus areas'))}</h3>${focus}</section>
+      <section class="card"><h3>${esc(t('Strengths'))}</h3>${strengths}</section>
+      <section class="card"><h3>${esc(t('Metrics'))}</h3><div class="mlist">${metricRows}</div>
+        <p class="muted small">${esc(session.reps.length > 1
+    ? t('Orange marker = average, dots = individual {r}. Shaded band = ideal range.', { r: t(repWordPlural) })
+    : t('Orange marker = average. Shaded band = ideal range.'))}</p></section>
       ${heightBars}
       ${repBars}
-      <section class="card"><h3>5-day practice plan</h3>${plan}</section>
+      <section class="card"><h3>${esc(t('5-day practice plan'))}</h3>${plan}</section>
       ${timeline}
       ${kf}
     </div>
-    <p class="muted small foot">Measured from 2D pose tracking (${esc(session.view)} view). Angles are estimates; film from the same angle each time to track progress reliably.</p>
+    <p class="muted small foot">${esc(t('Measured from 2D pose tracking ({v} view). Angles are estimates; film from the same angle each time to track progress reliably.', { v: t(session.view) }))}</p>
   </div>`;
+}
+
+/** Key-position caption: event name + time (older sessions stored a ready-made label). */
+export function keyframeLabel(it) {
+  if (it.type) return `${t(it.event)} · ${it.t.toFixed(2)}s`;
+  const m = /^(.*) · ([\d.]+s)$/.exec(it.label || '');
+  return m ? `${t(m[1])} · ${m[2]}` : t(it.label);
 }
 
 /** Jump headline numbers + dunk meter. */
 export function performanceHtml(perf) {
-  const stat = (label, value, sub = '') => `<div class="pstat"><div class="eyebrow">${label}</div><b>${value}</b>${sub ? `<span class="muted small">${sub}</span>` : ''}</div>`;
+  const stat = (label, value, sub = '') => `<div class="pstat"><div class="eyebrow">${esc(label)}</div><b>${value}</b>${sub ? `<span class="muted small">${esc(sub)}</span>` : ''}</div>`;
+  const reachSub = perf.reach != null
+    ? t(perf.reachEstimated ? 'reach {r} (est.) + jump' : 'reach {r} + jump', { r: formatLen(perf.reach) })
+    : t('add your height');
   return `<div class="pstats">
-      ${stat('Best jump', esc(formatLen(perf.best)), esc(perf.bestLabel || ''))}
-      ${stat('Average', esc(formatLen(perf.avg)))}
-      ${stat('Best flight time', perf.bestFlight != null ? `${perf.bestFlight.toFixed(3)} s` : '—')}
-      ${stat('Max touch', perf.maxTouch != null ? esc(formatLen(perf.maxTouch)) : '—', perf.reach != null ? `reach ${esc(formatLen(perf.reach))}${perf.reachEstimated ? ' (est.)' : ''} + jump` : 'add your height')}
+      ${stat(t('Best jump'), esc(formatLen(perf.best)), t(perf.bestLabel || ''))}
+      ${stat(t('Average'), esc(formatLen(perf.avg)))}
+      ${stat(t('Best flight time'), perf.bestFlight != null ? `${perf.bestFlight.toFixed(3)} s` : '—')}
+      ${stat(t('Max touch'), perf.maxTouch != null ? esc(formatLen(perf.maxTouch)) : '—', reachSub)}
     </div>
     ${dunkMeter(perf)}`;
 }
 
 export function dunkMeter(perf) {
   if (perf.maxTouch == null) {
-    return '<p class="muted small dunk-note">Add your height (and standing reach, if you know it) on the Analyze page to see your dunk meter.</p>';
+    return `<p class="muted small dunk-note">${esc(t('Add your height (and standing reach, if you know it) on the Analyze page to see your dunk meter.'))}</p>`;
   }
   const lo = Math.min(perf.reach, perf.rim - 60);
   const hi = Math.max(perf.dunkTarget + 30, perf.maxTouch + 10);
@@ -179,23 +207,24 @@ export function dunkMeter(perf) {
   const canDunk = perf.toDunk <= 0;
   const canTouch = perf.toRim <= 0;
   const msg = canDunk
-    ? 'You have the bounce to dunk 🔥 Now work on ball control at the rim.'
+    ? t('You have the bounce to dunk 🔥 Now work on ball control at the rim.')
     : canTouch
-      ? `You can touch the rim. ${esc(formatLen(perf.toDunk))} more to dunk.`
-      : `${esc(formatLen(perf.toRim))} to touch the rim · ${esc(formatLen(perf.toDunk))} to dunk.`;
-  const typeNote = perf.jumpType === 'standing'
-    ? ' This is a standing jump. A good run-up approach typically adds 10–20% more height.'
-    : '';
+      ? t('You can touch the rim. {d} more to dunk.', { d: formatLen(perf.toDunk) })
+      : t('{r} to touch the rim · {d} to dunk.', { r: formatLen(perf.toRim), d: formatLen(perf.toDunk) });
+  const note = t(perf.reachEstimated
+    ? 'Max touch = standing reach + jump height. Reach is estimated as 1.33 × height. Measure yours (flat-footed, one arm up) for a more accurate meter.'
+    : 'Max touch = standing reach + jump height. Reach is what you entered.')
+    + (perf.jumpType === 'standing' ? ` ${t('This is a standing jump. A good run-up approach typically adds 10–20% more height.')}` : '');
   return `<div class="dunk">
-    <div class="dunk-head"><b>Dunk meter</b><span class="${canDunk ? 'good-t' : canTouch ? 'ok-t' : ''}">${msg}</span></div>
-    <div class="dunk-track" role="img" aria-label="Max touch ${esc(formatLen(perf.maxTouch))}, rim ${esc(formatLen(perf.rim))}">
+    <div class="dunk-head"><b>${esc(t('Dunk meter'))}</b><span class="${canDunk ? 'good-t' : canTouch ? 'ok-t' : ''}">${esc(msg)}</span></div>
+    <div class="dunk-track" role="img" aria-label="${esc(t('Max touch {m}, rim {r}', { m: formatLen(perf.maxTouch), r: formatLen(perf.rim) }))}">
       <span class="dunk-fill" style="left:${pos(perf.reach)}%;width:${(pos(perf.maxTouch) - pos(perf.reach)).toFixed(1)}%"></span>
-      <span class="dunk-mark rim" style="left:${pos(perf.rim)}%"><i>Rim ${esc(formatLen(perf.rim))}</i></span>
-      <span class="dunk-mark dunkm" style="left:${pos(perf.dunkTarget)}%"><i>Dunk ~${esc(formatLen(perf.dunkTarget))}</i></span>
+      <span class="dunk-mark rim" style="left:${pos(perf.rim)}%"><i>${esc(t('Rim {v}', { v: formatLen(perf.rim) }))}</i></span>
+      <span class="dunk-mark dunkm" style="left:${pos(perf.dunkTarget)}%"><i>${esc(t('Dunk ~{v}', { v: formatLen(perf.dunkTarget) }))}</i></span>
       <span class="dunk-you" style="left:${pos(perf.maxTouch)}%"></span>
     </div>
-    <div class="dunk-scale muted small"><span>Standing reach ${esc(formatLen(perf.reach))}</span><span>Your max touch ${esc(formatLen(perf.maxTouch))}</span></div>
-    <p class="muted small">Max touch = standing reach + jump height. Reach is ${perf.reachEstimated ? 'estimated as 1.33 × height. Measure yours (flat-footed, one arm up) for a more accurate meter.' : 'what you entered.'}${typeNote}</p>
+    <div class="dunk-scale muted small"><span>${esc(t('Standing reach {v}', { v: formatLen(perf.reach) }))}</span><span>${esc(t('Your max touch {v}', { v: formatLen(perf.maxTouch) }))}</span></div>
+    <p class="muted small">${esc(note)}</p>
   </div>`;
 }
 
@@ -282,14 +311,14 @@ export const THEME_CSS = `
 
 /** A self-contained HTML document for download / sharing / printing. */
 export function standaloneHtml(session, extra) {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
+  return `<!doctype html><html lang="${getLang() === 'zh' ? 'zh-CN' : 'en'}"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>HoopLab report – ${esc(fmtDate(session.createdAt))}</title>
+<title>${esc(t('HoopLab report'))} – ${esc(fmtDate(session.createdAt))}</title>
 <style>${THEME_CSS}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 main{max-width:1080px;margin:0 auto;padding:24px 16px}
 .brand{font-weight:800;letter-spacing:.02em;margin-bottom:12px}.brand span{color:var(--accent)}
 @media print{body{background:#fff}.report .card{break-inside:avoid}}
 ${REPORT_CSS}</style></head>
-<body><main><div class="brand">Hoop<span>Lab</span> · Skill report</div>${summaryHtml(session, extra)}</main></body></html>`;
+<body><main><div class="brand">Hoop<span>Lab</span> · ${esc(t('Skill report'))}</div>${summaryHtml(session, extra)}</main></body></html>`;
 }

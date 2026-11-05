@@ -17,19 +17,20 @@
     <header class="topbar">
       <a class="brand" href="#analyze">Hoop<span>Lab</span></a>
       <nav>
-        <a href="#analyze" data-view="analyze">Analyze</a>
-        <a href="#report" data-view="report">Report</a>
-        <a href="#progress" data-view="progress">Progress</a>
+        <a href="#analyze" data-view="analyze" data-i18n>Analyze</a>
+        <a href="#report" data-view="report" data-i18n>Report</a>
+        <a href="#progress" data-view="progress" data-i18n>Progress</a>
       </nav>
-      <button class="btn icon ghost" id="themeBtn" aria-label="Toggle theme">◐</button>
+      <button class="btn ghost small lang-btn" id="langBtn">中文</button>
+      <button class="btn icon ghost" id="themeBtn" aria-label="Toggle theme" data-i18n-aria>◐</button>
     </header>
 
     <main>
       <!-- ===================== ANALYZE ===================== -->
       <section id="view-analyze" class="view">
         <div class="hero">
-          <h1>Film it. Analyze it. Get better.</h1>
-          <p class="muted">Upload a clip of your jumps, dunk attempts, jump shot or dribbling. HoopLab tracks your body in the browser, measures your form and builds a coaching report. Your video never leaves your device.</p>
+          <h1 data-i18n>Film it. Analyze it. Get better.</h1>
+          <p class="muted" data-i18n>Upload a clip of your jumps, dunk attempts, jump shot or dribbling. HoopLab tracks your body in the browser, measures your form and builds a coaching report. Your video never leaves your device.</p>
         </div>
 
         <div class="analyze-grid">
@@ -38,79 +39,83 @@
               <input type="file" id="file" accept="video/*" hidden />
               <div class="drop-inner" id="dropInner">
                 <div class="drop-icon">⬆</div>
-                <b>Drop a video here or tap to choose</b>
-                <span class="muted small">MP4 / MOV / WebM · 5–60 s works best</span>
+                <b data-i18n>Drop a video here or tap to choose</b>
+                <span class="muted small" data-i18n>MP4 / MOV / WebM · 5–60 s works best</span>
               </div>
               <video id="preview" class="preview" controls playsinline muted hidden></video>
             </label>
+            <div class="file-bar" id="fileBar" hidden>
+              <span class="small muted file-name" id="fileName"></span>
+              <button class="btn small" id="changeFile" data-i18n>Choose another video</button>
+            </div>
             <div class="trim" id="trim" hidden>
-              <label>Start <input type="number" id="tStart" min="0" step="0.1" value="0" /> s</label>
-              <label>End <input type="number" id="tEnd" min="0" step="0.1" /> s</label>
-              <button class="btn ghost small" id="useCurrent">Set start to current frame</button>
+              <label><span data-i18n>Start</span> <input type="number" id="tStart" min="0" step="0.1" value="0" /> s</label>
+              <label><span data-i18n>End</span> <input type="number" id="tEnd" min="0" step="0.1" /> s</label>
+              <button class="btn ghost small" id="useCurrent" data-i18n>Set start to current frame</button>
             </div>
 
             <div class="opts">
               <fieldset>
-                <legend>Skill</legend>
+                <legend data-i18n>Skill</legend>
                 <div class="seg" role="radiogroup">
-                  <label><input type="radio" name="mode" value="jump" checked /><span>🚀 Jump / dunk</span></label>
-                  <label><input type="radio" name="mode" value="shooting" /><span>🏀 Shooting</span></label>
-                  <label><input type="radio" name="mode" value="dribbling" /><span>⛹ Dribbling</span></label>
+                  <label><input type="radio" name="mode" value="jump" checked /><span data-i18n>🚀 Jump / dunk</span></label>
+                  <label><input type="radio" name="mode" value="shooting" /><span data-i18n>🏀 Shooting</span></label>
+                  <label><input type="radio" name="mode" value="dribbling" /><span data-i18n>⛹ Dribbling</span></label>
                 </div>
               </fieldset>
-              <label id="handOpt" hidden>Shooting / dribbling hand
-                <select id="hand"><option value="auto">Auto-detect</option><option value="right">Right</option><option value="left">Left</option></select>
+              <label id="handOpt" hidden><span data-i18n>Shooting / dribbling hand</span>
+                <select id="hand"><option value="auto" data-i18n>Auto-detect</option><option value="right" data-i18n>Right</option><option value="left" data-i18n>Left</option></select>
               </label>
-              <label>Camera angle
-                <select id="view"><option value="auto">Auto-detect</option><option value="side">Side-on</option><option value="front">Facing camera</option></select>
+              <label><span data-i18n>Camera angle</span>
+                <select id="view"><option value="auto" data-i18n>Auto-detect</option><option value="side" data-i18n>Side-on</option><option value="front" data-i18n>Facing camera</option></select>
               </label>
-              <label class="jump-opt">Jump type
-                <select id="jumpType"><option value="standing">Standing vertical</option><option value="approach">Approach / run-up (dunk)</option></select>
+              <label class="jump-opt"><span data-i18n>Jump type</span>
+                <select id="jumpType"><option value="standing" data-i18n>Standing vertical</option><option value="approach" data-i18n>Approach / run-up (dunk)</option></select>
               </label>
-              <label class="jump-opt">Your height
+              <label class="jump-opt"><span data-i18n>Your height</span>
                 <span class="unit-input"><input type="number" id="athleteHeight" min="0" step="0.5" placeholder="e.g. 180" /><span class="unit-label">cm</span></span>
               </label>
-              <label class="jump-opt">Standing reach <span class="muted">(optional)</span>
-                <span class="unit-input"><input type="number" id="athleteReach" min="0" step="0.5" placeholder="auto" /><span class="unit-label">cm</span></span>
+              <label class="jump-opt"><span><span data-i18n>Standing reach</span> <span class="muted" data-i18n>(optional)</span></span>
+                <span class="unit-input"><input type="number" id="athleteReach" min="0" step="0.5" placeholder="auto" data-i18n-ph /><span class="unit-label">cm</span></span>
               </label>
-              <label>Units
-                <select id="units"><option value="cm">Metric (cm)</option><option value="in">Imperial (in)</option></select>
+              <label><span data-i18n>Units</span>
+                <select id="units"><option value="cm" data-i18n>Metric (cm)</option><option value="in" data-i18n>Imperial (in)</option></select>
               </label>
-              <label>Analysis quality
-                <select id="quality"><option value="fast">Fast</option><option value="accurate">Accurate (slower)</option></select>
+              <label><span data-i18n>Analysis quality</span>
+                <select id="quality"><option value="fast" data-i18n>Fast</option><option value="accurate" data-i18n>Accurate (slower)</option></select>
               </label>
             </div>
 
             <div class="actions">
-              <button class="btn primary" id="analyzeBtn" disabled>Analyze video</button>
-              <button class="btn ghost" id="cancelBtn" hidden>Cancel</button>
+              <button class="btn primary" id="analyzeBtn" disabled data-i18n>Analyze video</button>
+              <button class="btn ghost" id="cancelBtn" hidden data-i18n>Cancel</button>
             </div>
             <div class="progress" id="progress" hidden>
               <div class="progress-bar"><span id="progressFill"></span></div>
-              <span class="small muted" id="status">Preparing…</span>
+              <span class="small muted" id="status" data-i18n>Preparing…</span>
             </div>
             <div class="error" id="error" hidden></div>
           </div>
 
           <aside class="side">
             <div class="card">
-              <h3>No video handy?</h3>
-              <p class="muted small">Explore a full report with sample data.</p>
+              <h3 data-i18n>No video handy?</h3>
+              <p class="muted small" data-i18n>Explore a full report with sample data.</p>
               <div class="actions">
-                <button class="btn" id="demoJump">Demo: vertical jumps</button>
-                <button class="btn" id="demoShoot">Demo: jump shots</button>
-                <button class="btn" id="demoDribble">Demo: dribbling</button>
+                <button class="btn" id="demoJump" data-i18n>Demo: vertical jumps</button>
+                <button class="btn" id="demoShoot" data-i18n>Demo: jump shots</button>
+                <button class="btn" id="demoDribble" data-i18n>Demo: dribbling</button>
               </div>
             </div>
             <div class="card tips">
-              <h3>Filming tips</h3>
+              <h3 data-i18n>Filming tips</h3>
               <ul>
-                <li><b>Whole body in frame</b>, head to feet, for the whole clip.</li>
-                <li><b>Jumps / dunks:</b> camera on a tripod, side-on, with your feet and the floor visible for the whole jump. Use 30 fps or more (60 fps is better). For an approach, film the last 2–3 steps and the take-off.</li>
-                <li><b>Shooting:</b> film from the side (shooting-hand side) for angles and arc. Film facing you to check elbow alignment.</li>
-                <li><b>Dribbling:</b> film facing you, 5+ seconds of continuous dribbling.</li>
-                <li>Tripod or a steady phone at waist height, 3–6 m away.</li>
-                <li>Good lighting, one player in frame, and try to film from the same spot each time.</li>
+                <li data-i18n><b>Whole body in frame</b>, head to feet, for the whole clip.</li>
+                <li data-i18n><b>Jumps / dunks:</b> camera on a tripod, side-on, with your feet and the floor visible for the whole jump. Use 30 fps or more (60 fps is better). For an approach, film the last 2–3 steps and the take-off.</li>
+                <li data-i18n><b>Shooting:</b> film from the side (shooting-hand side) for angles and arc. Film facing you to check elbow alignment.</li>
+                <li data-i18n><b>Dribbling:</b> film facing you, 5+ seconds of continuous dribbling.</li>
+                <li data-i18n>Tripod or a steady phone at waist height, 3–6 m away.</li>
+                <li data-i18n>Good lighting, one player in frame, and try to film from the same spot each time.</li>
               </ul>
             </div>
           </aside>
@@ -120,9 +125,9 @@
       <!-- ===================== REPORT ===================== -->
       <section id="view-report" class="view" hidden>
         <div class="empty card" id="reportEmpty">
-          <h3>No report yet</h3>
-          <p class="muted">Analyze a video or open a demo to see your report here.</p>
-          <a class="btn primary" href="#analyze">Analyze a video</a>
+          <h3 data-i18n>No report yet</h3>
+          <p class="muted" data-i18n>Analyze a video or open a demo to see your report here.</p>
+          <a class="btn primary" href="#analyze" data-i18n>Analyze a video</a>
         </div>
         <div id="reportBody" hidden>
           <div class="report-bar">
@@ -131,13 +136,14 @@
               <h2 id="repTitle"></h2>
             </div>
             <div class="tabs" role="tablist">
-              <button role="tab" class="tab active" data-tab="interactive">Interactive</button>
-              <button role="tab" class="tab" data-tab="summary">Summary report</button>
+              <button role="tab" class="tab active" data-tab="interactive" data-i18n>Interactive</button>
+              <button role="tab" class="tab" data-tab="summary" data-i18n>Summary report</button>
             </div>
             <div class="report-actions">
-              <button class="btn ghost small" id="dlHtml">Download report</button>
-              <button class="btn ghost small" id="dlJson">Export data</button>
-              <button class="btn ghost small" id="printBtn">Print / PDF</button>
+              <button class="btn primary small" id="newVideoBtn" data-i18n>Analyze another video</button>
+              <button class="btn ghost small" id="dlHtml" data-i18n>Download report</button>
+              <button class="btn ghost small" id="dlJson" data-i18n>Export data</button>
+              <button class="btn ghost small" id="printBtn" data-i18n>Print / PDF</button>
             </div>
           </div>
 
@@ -156,11 +162,11 @@
             </div>
             <div class="card">
               <div class="chart-head">
-                <h3>Movement timeline</h3>
+                <h3 data-i18n>Movement timeline</h3>
                 <div class="legend small muted" id="eventLegend"></div>
               </div>
               <div class="chart-wrap"><canvas id="timeline"></canvas></div>
-              <p class="small muted">Click anywhere on the chart to jump the video to that moment.</p>
+              <p class="small muted" data-i18n>Click anywhere on the chart to jump the video to that moment.</p>
             </div>
           </div>
           <div id="tab-summary" class="tabpanel" hidden></div>
@@ -171,14 +177,14 @@
       <section id="view-progress" class="view" hidden>
         <div class="card">
           <div class="chart-head">
-            <h3>Score over time</h3>
-            <button class="btn ghost small" id="clearHistory">Clear history</button>
+            <h3 data-i18n>Score over time</h3>
+            <button class="btn ghost small" id="clearHistory" data-i18n>Clear history</button>
           </div>
           <div class="chart-wrap short"><canvas id="progressChart"></canvas></div>
-          <p class="muted small" id="progressEmpty" hidden>Analyze a few sessions to see your progress here.</p>
+          <p class="muted small" id="progressEmpty" hidden data-i18n>Analyze a few sessions to see your progress here.</p>
         </div>
         <div class="card">
-          <h3>Sessions</h3>
+          <h3 data-i18n>Sessions</h3>
           <div id="sessionList" class="session-list"></div>
         </div>
       </section>
