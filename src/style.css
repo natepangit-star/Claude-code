@@ -160,4 +160,13 @@ select, input[type=number] { font: inherit; color: var(--text); background: var(
 /* upload bar + language button */
 .file-bar { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
 .file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lang-btn { font-weight: 700; }
+.lang-btn { font-weight: 700; white-space: nowrap; }
+.ev-penultimate::before { background: var(--c2); } .ev-plant::before { background: var(--accent); }
+@media (max-width: 480px) {
+  .topbar { gap: 4px; padding: 10px 8px; }
+  .brand { font-size: 1.05rem; }
+  nav { gap: 0; }
+  nav a { padding: 6px 7px; font-size: .92rem; }
+  .lang-btn { padding: 4px 8px; }
+  .topbar .btn.icon { padding: 5px 8px; }
+}

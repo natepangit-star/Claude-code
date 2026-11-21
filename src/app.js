@@ -5,7 +5,8 @@ import { t, setLang, getLang, locale } from './i18n.js';
 import { summaryHtml, standaloneHtml, rangeBar, scoreClass, ring, dunkMeter, keyframeLabel, REPORT_CSS } from './summary.js';
 import { timelineChart, progressChart } from './charts.js';
 import { Player } from './player.js';
-import { demoShooting, demoDribbling, demoJump } from './demo.js';
+import { demoShooting, demoDribbling, demoJump, demoApproach } from './demo.js';
+import { approachHtml, APPROACH_CSS } from './approachViz.js';
 import { listSessions, saveSession, getSession, deleteSession, clearSessions } from './storage.js';
 
 const $ = (s) => document.querySelector(s);
@@ -14,7 +15,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 // Report styles are shared with the downloadable file.
 const style = document.createElement('style');
-style.textContent = REPORT_CSS;
+style.textContent = REPORT_CSS + APPROACH_CSS;
 document.head.appendChild(style);
 
 // ------------------------------------------------------------------ theme
@@ -259,13 +260,14 @@ function setProgress(p, text) {
 }
 
 async function runDemo(kind) {
-  const d = kind === 'shooting' ? demoShooting() : kind === 'jump' ? demoJump() : demoDribbling();
+  const d = kind === 'shooting' ? demoShooting() : kind === 'jump' ? demoJump() : kind === 'approach' ? demoApproach() : demoDribbling();
   const session = analyzeSession(d.frames, { mode: d.mode, jumpType: d.jumpType, heightCm: d.athlete?.heightCm });
   if (session.error) return showError(t(session.error));
   await finishSession(session, { frames: d.frames, aspect: d.aspect, video: null, offset: 0, title: d.label, demo: true });
 }
 $('#demoShoot').onclick = () => runDemo('shooting');
 $('#demoJump').onclick = () => runDemo('jump');
+$('#demoApproach').onclick = () => runDemo('approach');
 $('#demoDribble').onclick = () => runDemo('dribbling');
 
 // ------------------------------------------------------------------ session lifecycle
@@ -372,6 +374,7 @@ function renderReport(session, { keepTab = false } = {}) {
   const evLabel = {
     load: 'Load', set: 'Set point', release: 'Release', follow: 'Follow-through end', dribble: 'Dribble',
     bottom: 'Bottom of dip', takeoff: 'Take-off', peak: 'Peak', landing: 'Landing', absorb: 'Landing absorb',
+    penultimate: 'Penultimate step', plant: 'Plant',
   };
   $('#eventLegend').innerHTML = evTypes.map((ty) => `<span class="ev ev-${ty}">${esc(t(evLabel[ty]))}</span>`).join('');
 
@@ -422,10 +425,28 @@ function selectRep(session, i, seek) {
     b.onclick = () => { const t = Number(b.dataset.seek); state.player?.pause(); state.player?.seek(t); state.chart.setPlayhead(t); };
   });
   state.chart.setFocus(i);
+  renderApproachCard(session, rep);
   if (seek && state.player) {
     const t = rep.events[0]?.t ?? rep.t0;
     state.player.seek(Math.max(rep.t0, t - 0.3));
   }
+}
+
+/** Run-up story for the selected jump; anything with data-seek jumps the video there. */
+function renderApproachCard(session, rep) {
+  const card = $('#approachCard');
+  card.hidden = !rep.approach;
+  if (!rep.approach) { card.innerHTML = ''; return; }
+  card.innerHTML = approachHtml(session, rep, { interactive: !!state.player });
+  card.querySelectorAll('[data-seek]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const tt = Number(el.dataset.seek);
+      state.player?.pause();
+      state.player?.seek(Math.max(0, tt - 0.05));
+      state.chart?.setPlayhead(tt);
+      state.player?.stage?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  });
 }
 
 function renderSummaryTab(session) {

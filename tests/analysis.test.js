@@ -168,3 +168,68 @@ for (const [name, cam] of [
     assert.ok(Math.abs(s.reps[0].metrics.hipRise.value - s.reps[0].height) < 10, `hipRise ${s.reps[0].metrics.hipRise.value.toFixed(1)}`);
   });
 }
+
+// ---------------------------------------------------------------- run-up
+import { demoApproach } from '../src/demo.js';
+import { approachHtml } from '../src/approachViz.js';
+
+const GOOD_RUNUP = {
+  takeoff: 'one-foot', stepTimes: [0.27, 0.25, 0.24], penStep: 0.26, finalStep: 0.2,
+  speeds: [3.4, 4.0, 4.4, 4.6, 4.7, 4.6], penDrop: 0.09, plantContact: 0.18, plantAngle: 52, plantLean: 2,
+};
+
+test('run-up: finds every step of a 1-2 take-off and the planted flaws', () => {
+  const d = demoApproach();
+  const s = analyzeSession(d.frames, { mode: 'jump', jumpType: 'approach', heightCm: 185 });
+  assert.ok(!s.error, s.error);
+  const r = s.reps[0], A = r.approach;
+  assert.equal(A.takeoff, 'one-two');
+  assert.equal(A.steps.length, d.truth.steps + 1, 'all touchdowns found');
+  assert.ok(Math.abs(A.penultimateT - d.truth.tPen) < 0.03, `penultimate ${A.penultimateT}`);
+  assert.ok(Math.abs(A.plantT - d.truth.tPlant) < 0.03, `plant ${A.plantT}`);
+  assert.ok(Math.abs(r.metrics.plantContact.value - d.truth.plantContact) < 0.03);
+  assert.ok(Math.abs(r.metrics.plantAngle.value - 70) < 5, `plant angle ${r.metrics.plantAngle.value}`);
+  assert.ok(Math.abs(r.metrics.plantLean.value - 18) < 3, `lean ${r.metrics.plantLean.value}`);
+  assert.ok(Math.abs(r.height - d.truth.jumpCm) < 4);
+  const flaws = s.summary.focus.map((f) => f.key);
+  for (const k of ['plantAngle', 'plantLean', 'speedKeep', 'penultimateRatio']) assert.ok(r.metrics[k].score < 85, `${k} flagged`);
+  assert.ok(flaws.includes('plantLean') || flaws.includes('plantAngle'), flaws.join());
+  assert.ok(A.steps.some((st) => st.stutter), 'stutter step marked');
+  // Phases run in order and the report renders the run-up story.
+  A.phases.forEach((p, i) => i && assert.ok(p.t0 >= A.phases[i - 1].t0));
+  const html = approachHtml(s, r, { interactive: true });
+  for (const part of ['Run-up to take-off', 'class="ghosts"', 'class="ribbon"', 'Leaning into the plant', 'data-seek']) assert.ok(html.includes(part), part);
+});
+
+test('run-up: a clean one-foot take-off has no run-up flaws and measures the free knee', () => {
+  const d = demoApproach(GOOD_RUNUP);
+  const s = analyzeSession(d.frames, { mode: 'jump', jumpType: 'approach', heightCm: 185 });
+  const r = s.reps[0];
+  assert.equal(r.approach.takeoff, 'one-foot');
+  for (const k of ['penultimateRatio', 'penultimateDrop', 'plantContact', 'plantAngle', 'plantLean', 'speedKeep', 'stepRhythm', 'freeKnee']) {
+    assert.ok(r.metrics[k], `${k} measured`);
+    assert.ok(r.metrics[k].score >= 85, `${k} ${r.metrics[k].value} scored ${r.metrics[k].score}`);
+  }
+  assert.ok(!r.approach.steps.some((st) => st.stutter));
+});
+
+test('run-up: running away from the camera keeps timing metrics, skips side-only ones', () => {
+  const T = demoApproach().frames;
+  const end = T[T.length - 1].t;
+  // Shrink the athlete over time toward a horizon, as if running away from the camera.
+  const frames = T.map((f) => {
+    const k = 1.25 - 0.7 * (f.t / end);
+    return { t: f.t, lm: f.lm.map((p) => ({ ...p, x: 0.9 + (p.x - 0.9) * k * 0.25, y: 0.35 + (p.y - 0.35) * k })) };
+  });
+  const s = analyzeSession(frames, { mode: 'jump', jumpType: 'approach', heightCm: 185, view: 'side' });
+  const r = s.reps[0];
+  assert.ok(r.approach, 'run-up found');
+  assert.equal(r.approach.sideOn, false);
+  assert.ok(r.metrics.plantContact, 'plant contact still measured');
+  for (const k of ['penultimateRatio', 'plantAngle', 'speedKeep', 'approachSpeed']) assert.ok(!r.metrics[k], `${k} skipped`);
+});
+
+test('run-up: a standing jump has no run-up section', () => {
+  const s = analyzeSession(demoJump().frames, { mode: 'jump', jumpType: 'approach', heightCm: 185 });
+  assert.ok(s.reps.every((r) => !r.approach));
+});

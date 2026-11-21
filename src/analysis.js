@@ -6,6 +6,7 @@
 // Landmark indices follow the MediaPipe 33-point pose model.
 
 import { SHOT_METRICS, DRIBBLE_METRICS, metricDefs, RIM_CM, DUNK_CLEARANCE_CM } from './metrics.js';
+import { analyzeApproach, compactPose } from './approach.js';
 
 export const LM = {
   NOSE: 0,
@@ -630,27 +631,68 @@ function analyzeJump(frames, view, opts) {
       landingFlex: argBy(F.knee, land, absorbEnd, (x, y) => x < y) >= 0 ? F.knee[argBy(F.knee, land, absorbEnd, (x, y) => x < y)] : null,
       kneeValgus: F.kneeW[absorb] != null && F.ankleW[absorb] ? F.kneeW[absorb] / F.ankleW[absorb] : null,
     };
+    // Run-up: every foot contact before the plant.
+    const run = approach
+      ? analyzeApproach({ frames, times, F, scale, cmPerTorso, view, takeIdx: take, tTake: jp.tTake, startIdx: prevEnd })
+      : null;
+    if (run) {
+      if (!run.sideOn) values.approachSpeed = null; // not measurable when running toward/away from the camera
+      // Standing-jump ideas that the plant metrics replace on a run-up.
+      values.hipHinge = null;
+      values.transition = null;
+      // The dip of a run-up happens during the plant.
+      const plantIdx = indexAt(times, run.plantT);
+      const dip = lowestHip(plantIdx, take);
+      if (dip >= 0) { bottom = dip; values.loadDepth = F.knee[bottom]; }
+      for (const [key, v] of Object.entries(run.values)) if (v != null) values[key] = v;
+      run.poses.push(
+        { role: 'takeoff', t: jp.tTake, pose: compactPose(frames[take]?.lm) },
+        { role: 'peak', t: times[peak], pose: compactPose(frames[peak]?.lm) },
+        { role: 'landing', t: jp.tLand, pose: compactPose(frames[Math.min(n - 1, land)]?.lm) },
+      );
+      delete run.values;
+    }
+
     const { metrics, score } = scoreMetrics(values, metricDefs('jump', opts.jumpType), view);
     const ev = (type, idx, label, t = times[idx]) => ({ type, label, idx, t });
+    const events = [
+      ev('bottom', bottom, 'Bottom of dip'),
+      ev('takeoff', take, 'Take-off', jp.tTake),
+      ev('peak', peak, 'Peak'),
+      ev('landing', land, 'Landing', jp.tLand),
+      ev('absorb', absorb, 'Landing absorb'),
+    ];
+    if (run) {
+      events.push(
+        ev('penultimate', indexAt(times, run.penultimateT), 'Penultimate step', run.penultimateT),
+        ev('plant', indexAt(times, run.plantT), 'Plant', run.plantT),
+      );
+      events.sort((a, b) => a.t - b.t);
+      const firstStep = run.steps[0].tOn;
+      run.phases = [
+        run.steps.length > 2 && { key: 'approach', t0: firstStep, t1: run.penultimateT },
+        { key: 'penultimate', t0: run.penultimateT, t1: run.plantT },
+        { key: 'plant', t0: run.plantT, t1: jp.tTake },
+        { key: 'flight', t0: jp.tTake, t1: jp.tLand },
+        { key: 'landing', t0: jp.tLand, t1: times[absorbEnd] },
+      ].filter(Boolean);
+    }
     return {
       id: k + 1,
       label: `Jump ${k + 1}`,
-      t0: times[winStart],
+      t0: run ? Math.min(times[winStart], run.steps[0].tOn - 0.1) : times[winStart],
       t1: times[absorbEnd],
-      events: [
-        ev('bottom', bottom, 'Bottom of dip'),
-        ev('takeoff', take, 'Take-off', jp.tTake),
-        ev('peak', peak, 'Peak'),
-        ev('landing', land, 'Landing', jp.tLand),
-        ev('absorb', absorb, 'Landing absorb'),
-      ],
+      events,
       metricEvent: {
         loadDepth: 'bottom', hipHinge: 'bottom', transition: 'takeoff', armDrive: 'takeoff', takeoffExtension: 'takeoff',
         jumpHeight: 'peak', flightTime: 'peak', hipRise: 'peak', approachSpeed: 'takeoff', landingFlex: 'absorb', kneeValgus: 'absorb',
+        approachSteps: 'plant', penultimateRatio: 'penultimate', penultimateDrop: 'penultimate', speedKeep: 'penultimate',
+        stepRhythm: 'penultimate', plantContact: 'plant', plantAngle: 'plant', plantLean: 'plant', freeKnee: 'takeoff',
       },
       metrics,
       score,
       height,
+      approach: run,
     };
   });
 
