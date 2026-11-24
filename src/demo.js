@@ -202,3 +202,190 @@ export function demoJump({ fps = 30, seed = 11, athleteCm = 185 } = {}) {
   }
   return { frames, aspect: 16 / 9, mode: 'jump', label: 'Demo: 3 standing vertical jumps (side view)', athlete: { heightCm: athleteCm }, jumpType: 'standing' };
 }
+
+// ---------------------------------------------------------------- run-up demo
+
+/**
+ * Side-view athlete running a 4-step approach into a jump, built from a foot
+ * contact schedule (so the run-up analysis has a known answer).
+ * `takeoff`: 'one-two' (penultimate foot stays down, both feet push off) or 'one-foot'.
+ */
+export function demoApproach({
+  fps = 60, seed = 5, athleteCm = 185, takeoff = 'one-two',
+  stepTimes = [0.27, 0.15, 0.26], // approach step intervals (s); the short one is a stutter
+  penStep = 0.17, finalStep = 0.27, // time into the penultimate step, then into the plant
+  speeds = [3.4, 4.2, 4.6, 4.6, 3.6, 3.2], // m/s at each touchdown (last two = penultimate, plant)
+  penDrop = 0.02, // hip lowering on the penultimate step (fraction of hip height)
+  plantContact = 0.34, plantAngle = 70, plantLean = 18, jumpCm = 55,
+} = {}) {
+  const noise = rng(seed);
+  const H = 0.46; // figure height in video-height units
+  const perM = H / (athleteCm / 100);
+  const G = 0.93; // floor line
+  const thigh = 0.245 * H, shank = 0.246 * H, ankleH = 0.039 * H, torso = 0.30 * H;
+  const standHip = thigh + shank + ankleH; // 0.53 H
+  const dir = 1;
+
+  // Touchdown schedule.
+  const tds = [0.25];
+  for (const st of stepTimes) tds.push(tds[tds.length - 1] + st);
+  tds.push(tds[tds.length - 1] + penStep); // penultimate touchdown
+  tds.push(tds[tds.length - 1] + finalStep); // plant touchdown
+  const tPen = tds[tds.length - 2], tPlant = tds[tds.length - 1];
+  const tTake = tPlant + plantContact;
+  const T0 = 2 * Math.sqrt((2 * jumpCm) / 100 / 9.81);
+  const tLand = tTake + T0;
+  const end = tLand + 1.0;
+
+  // Horizontal hip speed (units/s), piecewise linear through the touchdowns.
+  const vKeys = tds.map((t, i) => [t, speeds[Math.min(i, speeds.length - 1)] * perM]);
+  vKeys.unshift([0, speeds[0] * perM * 0.9]);
+  vKeys.push([tTake, speeds[speeds.length - 1] * perM * 0.55]);
+  const vAt = (t) => {
+    if (t <= vKeys[0][0]) return vKeys[0][1];
+    for (let i = 1; i < vKeys.length; i++) if (t <= vKeys[i][0]) {
+      const [a, va] = vKeys[i - 1], [b, vb] = vKeys[i];
+      return va + ((vb - va) * (t - a)) / (b - a);
+    }
+    return vKeys[vKeys.length - 1][1];
+  };
+  const dtI = 1 / 600;
+  const xs = [];
+  let x = 0.12;
+  for (let t = 0; t <= end + 0.01; t += dtI) {
+    xs.push(x);
+    const v = t < tTake ? vAt(t) : t < tLand ? vKeys[vKeys.length - 1][1] : vKeys[vKeys.length - 1][1] * Math.max(0, 1 - (t - tLand) / 0.25);
+    x += v * dtI;
+  }
+  const hipXAt = (t) => xs[Math.min(xs.length - 1, Math.max(0, Math.round(t / dtI)))];
+
+  // Hip height above the floor.
+  const hipHAt = (t) => {
+    if (t >= tTake && t <= tLand) {
+      const u = (t - tTake) / T0;
+      return standHip * 1.04 + 4 * (jumpCm / 100) * perM * u * (1 - u);
+    }
+    if (t > tLand) {
+      const k = [[0, 1.04], [0.18, 0.8], [0.8, 0.98], [5, 0.98]];
+      const [a, b] = [k.findLast((q) => q[0] <= t - tLand), k.find((q) => q[0] > t - tLand)];
+      return standHip * lerp(a[1], b[1], ease((t - tLand - a[0]) / (b[0] - a[0])));
+    }
+    if (t >= tPlant) { // plant: compress then extend onto the toes
+      const u = (t - tPlant) / plantContact;
+      return standHip * (u < 0.45 ? lerp(0.9 - penDrop, 0.84, ease(u / 0.45)) : lerp(0.84, 1.04, ease((u - 0.45) / 0.55)));
+    }
+    const run = 0.93;
+    if (t >= tPen) return standHip * lerp(run, run - penDrop, ease(Math.min(1, (t - tPen) / (penStep * 0.6))));
+    // Running bounce: lower in stance, higher between steps.
+    const i = tds.findLastIndex((q) => q <= t);
+    const u = i < 0 ? 0.5 : (t - tds[i]) / ((tds[i + 1] ?? tds[i] + 0.25) - tds[i]);
+    return standHip * (run - 0.03 * Math.sin(Math.PI * Math.min(1, u * 2)));
+  };
+
+  // Foot stances: alternate feet, the plant foot is the opposite of the penultimate.
+  const feet = { left: [], right: [] };
+  tds.forEach((t, i) => {
+    const side = (tds.length - 2 - i) % 2 === 0 ? 'left' : 'right'; // penultimate = left
+    const isPlant = i === tds.length - 1, isPen = i === tds.length - 2;
+    const dy = hipHAt(t) - ankleH;
+    const reach = isPlant ? (dy + ankleH) / Math.tan(rad(plantAngle)) : isPen ? 0.2 * H : 0.12 * H;
+    const off = isPlant ? tTake : isPen ? (takeoff === 'one-two' ? tTake : tPen + 0.13) : t + 0.12;
+    feet[side].push({ on: t, off, x: hipXAt(t) + reach * dir });
+  });
+  const landX = { left: hipXAt(tLand) - 0.03 * H, right: hipXAt(tLand) + 0.06 * H };
+  const freeSide = takeoff === 'one-foot' ? 'left' : null;
+
+  const footAt = (side, t) => {
+    if (t >= tLand) return { x: landX[side], y: G - ankleH, raise: 0 };
+    if (t > tTake) { // flight: straight legs under the hips (free knee tucks early on)
+      const hx = hipXAt(t), hy = G - hipHAt(t);
+      const tuck = side === freeSide ? Math.max(0, 1 - (t - tTake) / (T0 * 0.5)) : 0;
+      return { x: hx + (0.02 + 0.18 * tuck) * H * dir, y: hy + (standHip * 1.04 - ankleH - 0.035 * H) - 0.25 * H * tuck, raise: 1 };
+    }
+    const st = feet[side];
+    const cur = st.find((s) => t >= s.on && t <= s.off);
+    if (cur) {
+      const raise = t > cur.off - 0.06 ? (t - (cur.off - 0.06)) / 0.06 : 0;
+      return { x: cur.x, y: G - ankleH - 0.035 * H * raise, raise };
+    }
+    const next = st.find((s) => s.on > t);
+    const prev = [...st].reverse().find((s) => s.off < t);
+    if (side === freeSide && !next) { // drive the free knee up into take-off
+      const u = Math.min(1, (t - prev.off) / (tTake - prev.off));
+      const hx = hipXAt(t), hy = G - hipHAt(t);
+      return { x: lerp(prev.x, hx + 0.2 * H * dir, ease(u)), y: lerp(G - ankleH, hy + 0.3 * H, ease(u)), raise: 1 };
+    }
+    const from = prev ? { x: prev.x, t: prev.off } : { x: (next?.x ?? hipXAt(t)) - 2 * speeds[0] * perM * (next?.on ?? 0.3), t: 0 };
+    const to = next ? { x: next.x, t: next.on } : { x: from.x, t: t + 1 };
+    // Swing at steady speed (a real swing foot doesn't stop before touchdown).
+    const u = Math.max(0, Math.min(1, (t - from.t) / (to.t - from.t)));
+    return { x: lerp(from.x, to.x, u), y: G - ankleH - 0.16 * H * Math.sin(Math.PI * u), raise: 0.5 };
+  };
+
+  const knee = (hip, ank) => {
+    let dx = ank.x - hip.x, dy = ank.y - hip.y;
+    let d = Math.hypot(dx, dy);
+    const maxD = thigh + shank - 1e-4;
+    if (d > maxD) { dx *= maxD / d; dy *= maxD / d; d = maxD; }
+    const a = Math.acos(Math.min(1, (thigh * thigh + d * d - shank * shank) / (2 * thigh * d)));
+    const th = Math.atan2(dy, dx) - a * dir;
+    return { x: hip.x + thigh * Math.cos(th), y: hip.y + thigh * Math.sin(th) };
+  };
+  const leanAt = (t) => {
+    if (t < tPen) return 12;
+    if (t < tPlant) return lerp(12, plantLean, ease((t - tPen) / (tPlant - tPen)));
+    if (t < tTake) return lerp(plantLean, 3, ease((t - tPlant) / plantContact));
+    if (t < tLand) return 3;
+    return lerp(3, 25, Math.min(1, (t - tLand) / 0.18)) * (t - tLand < 0.5 ? 1 : 0.5);
+  };
+  // Arm angle: 0 = hanging, 90 = forward, 180 = overhead; negative = behind.
+  const armAt = (side, t, legAng) => {
+    const run = 10 - legAng;
+    if (t < tPen) return run;
+    if (t < tPlant) return lerp(run, -55, ease((t - tPen) / (tPlant - tPen)));
+    if (t < tTake) return lerp(-55, 165, ease((t - tPlant) / plantContact));
+    if (t < tLand) return 165;
+    return lerp(165, 30, Math.min(1, (t - tLand) / 0.4));
+  };
+
+  const frames = [];
+  for (let i = 0; i <= end * fps; i++) {
+    const t = i / fps;
+    const lm = blank();
+    const set = (idx, p, v = 0.95) => { lm[idx] = { x: p.x + noise() * 0.002, y: p.y + noise() * 0.002, v }; };
+    const hip = { x: hipXAt(t), y: G - hipHAt(t) };
+    const lean = rad(leanAt(t));
+    const sh = { x: hip.x + torso * Math.sin(lean) * dir, y: hip.y - torso * Math.cos(lean) };
+    set(LM.NOSE, { x: sh.x + 0.05 * H * dir, y: sh.y - 0.1 * H });
+    for (const side of ['left', 'right']) {
+      const far = side === 'left';
+      const v = far ? 0.75 : 0.95;
+      const depth = far ? -0.004 : 0;
+      const ids = far
+        ? { sh: LM.L_SH, el: LM.L_EL, wr: LM.L_WR, hip: LM.L_HIP, kn: LM.L_KN, an: LM.L_AN, he: LM.L_HEEL, to: LM.L_TOE }
+        : { sh: LM.R_SH, el: LM.R_EL, wr: LM.R_WR, hip: LM.R_HIP, kn: LM.R_KN, an: LM.R_AN, he: LM.R_HEEL, to: LM.R_TOE };
+      const f = footAt(side, t);
+      const ank = { x: f.x, y: f.y };
+      const kn = knee(hip, ank);
+      set(ids.hip, { x: hip.x + depth, y: hip.y }, v);
+      set(ids.kn, { x: kn.x + depth, y: kn.y }, v);
+      set(ids.an, { x: ank.x + depth, y: ank.y }, v);
+      set(ids.he, { x: ank.x - 0.03 * H * dir + depth, y: ank.y + ankleH }, v);
+      set(ids.to, { x: ank.x + 0.08 * H * dir + depth, y: ank.y + ankleH + 0.035 * H * f.raise }, v);
+      const legAng = (Math.atan2((ank.x - hip.x) * dir, ank.y - hip.y) * 180) / Math.PI;
+      const p = rad(armAt(side, t, legAng));
+      const el = { x: sh.x + 0.17 * H * Math.sin(p) * dir, y: sh.y + 0.17 * H * Math.cos(p) };
+      const q = p + rad(t > tPlant && t < tLand ? 10 : 70);
+      const wr = { x: el.x + 0.15 * H * Math.sin(q) * dir, y: el.y + 0.15 * H * Math.cos(q) };
+      set(ids.sh, { x: sh.x + depth, y: sh.y }, v);
+      set(ids.el, { x: el.x + depth, y: el.y }, v);
+      set(ids.wr, { x: wr.x + depth, y: wr.y }, v);
+    }
+    frames.push({ t, lm });
+  }
+  return {
+    frames, aspect: 16 / 9, mode: 'jump', jumpType: 'approach', athlete: { heightCm: athleteCm },
+    label: 'Demo: run-up dunk attempt (side view)',
+    truth: { tPen, tPlant, tTake, tLand, jumpCm, plantContact, steps: tds.length - 1 },
+  };
+}

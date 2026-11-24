@@ -11,7 +11,7 @@ const css = (name) => getComputedStyle(document.documentElement).getPropertyValu
 const SERIES_COLORS = ['--c1', '--c2', '--c3'];
 const EVENT_COLORS = {
   load: '--c2', set: '--c3', release: '--accent', follow: '--muted', dribble: '--c1',
-  bottom: '--c2', takeoff: '--accent', peak: '--c3', landing: '--c1', absorb: '--muted',
+  bottom: '--c2', takeoff: '--accent', peak: '--c3', landing: '--c1', absorb: '--muted', penultimate: '--c2', plant: '--accent',
 };
 
 /** Draws rep shading, event lines and the playhead on top of a line chart. */
@@ -28,6 +28,17 @@ const markers = {
       ctx.fillStyle = css('--muted');
       ctx.font = '11px system-ui, sans-serif';
       if (opts.reps.length > 1) ctx.fillText(t(r.label), x0 + 4, a.top + 12);
+      // Phase strip along the top for the selected jump's run-up.
+      if ((r.active || opts.reps.length === 1) && r.approach?.phases) {
+        const PH = { approach: '--muted', penultimate: '--c2', plant: '--accent', flight: '--c3', landing: '--c1' };
+        for (const p of r.approach.phases) {
+          const px0 = x.getPixelForValue(p.t0), px1 = x.getPixelForValue(p.t1);
+          ctx.fillStyle = css(PH[p.key] || '--muted');
+          ctx.globalAlpha = 0.85;
+          ctx.fillRect(px0, a.top, Math.max(1, px1 - px0 - 1), 6);
+          ctx.globalAlpha = 1;
+        }
+      }
     }
     for (const e of opts.events || []) {
       const px = x.getPixelForValue(e.t);

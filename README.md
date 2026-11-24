@@ -17,7 +17,7 @@ npm test           # analysis engine unit tests
 npm run build      # static site in dist/ (host anywhere)
 ```
 
-No video handy? Use **Demo: vertical jumps**, **Demo: jump shots** or **Demo: dribbling** on the Analyze page to explore a full report with sample data.
+No video handy? Use **Demo: run-up dunk**, **Demo: vertical jumps**, **Demo: jump shots** or **Demo: dribbling** on the Analyze page to explore a full report with sample data.
 
 ## Languages
 
@@ -53,6 +53,29 @@ Choose **Jump / dunk**, pick **Standing vertical** or **Approach / run-up**, and
 
 - Per-jump heights, key positions (dip, take-off, peak, landing), drills for each issue, and a 5-day plan that alternates technique, strength and plyometric days with a rest day.
 - **Progress** charts your best jump over time next to your technique score.
+
+### Run-up analysis (approach jumps)
+
+Choose **Approach / run-up (dunk)**. The app finds every foot contact before take-off and works out the take-off style: one-foot, "1-2 step" (penultimate foot stays down and both feet push off) or a two-foot jump stop. Then it grades each phase:
+
+| Metric | View | Ideal | What it catches |
+|---|---|---|---|
+| Penultimate vs final step length | side | 1.05–1.6× | No "long–short" rhythm, over-reaching |
+| Hip lowering on penultimate step | any | 4–15% lower | Not lowering before the plant, sinking too low |
+| Plant contact time | any | 0.12–0.30 s | Slow plant that bleeds speed |
+| Plant leg angle at touchdown | side | 45–62° | Over-reaching (braking), plant under the hips |
+| Body lean at plant | side | −12° to +10° | Leaning into the plant, leaning back |
+| Speed kept into take-off | side | ≥ 90% of top speed | Slowing down / hesitating before take-off |
+| Run-up rhythm | any | ≤ 18% variation | Stutter steps (flagged on the exact step) |
+| Free-knee drive (one-foot) | side | ≥ 65° | Weak free-knee drive |
+
+The report shows the run-up as a story:
+- **Phase ribbon** (run-up → penultimate → plant → flight → landing) with a grade for each phase.
+- **Strobe-style ghost sequence** of every step, coloured by phase, with numbered flaw badges on the step where each flaw happens.
+- **Step-rhythm chart** (step length or time, contact time, speed line, "long → short" target).
+- **Ranked flaw cards** with a tip, a drill and "Watch this moment".
+
+Tap any ghost, bar or phase to jump the video there. From an angled or behind-the-player camera it measures timing, contact time and hip lowering, and says which checks need a side-on view.
 
 Film on a tripod, side-on, with your feet and the floor visible for the whole jump. The flight-time method assumes you land in roughly the same posture you took off in. Tucking your legs in the air inflates the number.
 
@@ -97,7 +120,9 @@ The camera view (side-on vs facing the camera) is auto-detected. Metrics that ca
 index.html          app shell (Analyze / Report / Progress)
 src/app.js          UI wiring, report rendering, downloads, history
 src/pose.js         MediaPipe pose extraction from the uploaded video
-src/analysis.js     pure analysis engine: features, shot/dribble detection, scoring, coaching
+src/analysis.js     pure analysis engine: features, shot/dribble/jump detection, scoring, coaching
+src/approach.js     run-up analysis: foot contacts, steps, penultimate, plant, take-off style
+src/approachViz.js  run-up visuals: phase ribbon, ghost sequence, step rhythm, flaw cards
 src/metrics.js      metric definitions: ideal ranges, weights, tips, drills
 src/summary.js      static report HTML (in-app tab + downloadable file)
 src/charts.js       timeline + progress charts (Chart.js)

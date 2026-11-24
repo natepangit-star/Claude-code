@@ -2,6 +2,7 @@
 // and for the downloadable stand-alone HTML file.
 import { formatMetric, formatIdeal, localDefs, formatLen, modeLabel } from './metrics.js';
 import { t, locale, getLang } from './i18n.js';
+import { approachHtml, APPROACH_CSS } from './approachViz.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -158,6 +159,7 @@ export function summaryHtml(session, extra = {}) {
     </header>
     ${warnings}
     ${isJump && perf ? `<section class="card wide perf">${performanceHtml(perf)}</section>` : ''}
+    ${isJump ? session.reps.filter((r) => r.approach).map((r) => `<section class="card wide">${session.reps.length > 1 ? `<div class="eyebrow">${esc(t(r.label))}</div>` : ''}${approachHtml(session, r)}</section>`).join('') : ''}
     <div class="grid">
       <section class="card"><h3>${esc(t('Focus areas'))}</h3>${focus}</section>
       <section class="card"><h3>${esc(t('Strengths'))}</h3>${strengths}</section>
@@ -304,9 +306,9 @@ export const REPORT_CSS = `
 `;
 
 export const THEME_CSS = `
-:root{--bg:#f5f3ef;--surface:#ffffff;--text:#1d1b19;--muted:#6f6a63;--border:#e5e0d8;--chip:#efebe5;--accent:#e8620c;--good:#1f9d63;--ok:#d89614;--bad:#d4473a}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0f1115;--surface:#181b21;--text:#eceae6;--muted:#9a958d;--border:#2a2e36;--chip:#242830;--accent:#ff7a1a;--good:#34c27f;--ok:#e6a92b;--bad:#ef6253}}
-:root[data-theme="dark"]{--bg:#0f1115;--surface:#181b21;--text:#eceae6;--muted:#9a958d;--border:#2a2e36;--chip:#242830;--accent:#ff7a1a;--good:#34c27f;--ok:#e6a92b;--bad:#ef6253}
+:root{--bg:#f5f3ef;--surface:#ffffff;--text:#1d1b19;--muted:#6f6a63;--border:#e5e0d8;--chip:#efebe5;--accent:#e8620c;--good:#1f9d63;--ok:#d89614;--bad:#d4473a;--c1:#2f7fd8;--c2:#8b5cf6;--c3:#0f9f8f}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0f1115;--surface:#181b21;--text:#eceae6;--muted:#9a958d;--border:#2a2e36;--chip:#242830;--accent:#ff7a1a;--good:#34c27f;--ok:#e6a92b;--bad:#ef6253;--c1:#5aa2f0;--c2:#a78bfa;--c3:#2fc7b3}}
+:root[data-theme="dark"]{--bg:#0f1115;--surface:#181b21;--text:#eceae6;--muted:#9a958d;--border:#2a2e36;--chip:#242830;--accent:#ff7a1a;--good:#34c27f;--ok:#e6a92b;--bad:#ef6253;--c1:#5aa2f0;--c2:#a78bfa;--c3:#2fc7b3}
 `;
 
 /** A self-contained HTML document for download / sharing / printing. */
@@ -319,6 +321,6 @@ export function standaloneHtml(session, extra) {
 main{max-width:1080px;margin:0 auto;padding:24px 16px}
 .brand{font-weight:800;letter-spacing:.02em;margin-bottom:12px}.brand span{color:var(--accent)}
 @media print{body{background:#fff}.report .card{break-inside:avoid}}
-${REPORT_CSS}</style></head>
+${REPORT_CSS}${APPROACH_CSS}</style></head>
 <body><main><div class="brand">Hoop<span>Lab</span> · ${esc(t('Skill report'))}</div>${summaryHtml(session, extra)}</main></body></html>`;
 }

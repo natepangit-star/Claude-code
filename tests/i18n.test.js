@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { MODES } from '../src/metrics.js';
 import { analyzeSession } from '../src/analysis.js';
-import { demoShooting, demoDribbling, demoJump } from '../src/demo.js';
+import { demoShooting, demoDribbling, demoJump, demoApproach } from '../src/demo.js';
 import { summaryHtml } from '../src/summary.js';
 import { t, setLang, hasTranslation } from '../src/i18n.js';
 
@@ -26,8 +26,10 @@ test('every string the analysis produces has a Chinese translation', () => {
     analyzeSession(demoJump().frames, { mode: 'jump', jumpType: 'standing', heightCm: 185 }),
     analyzeSession(demoShooting().frames, { mode: 'shooting' }),
     analyzeSession(demoDribbling().frames, { mode: 'dribbling' }),
+    analyzeSession(demoApproach().frames, { mode: 'jump', jumpType: 'approach', heightCm: 185 }),
   ];
-  const all = [];
+  const all = ['Demo: run-up dunk attempt (side view)', 'Run-up', 'Penultimate', 'Plant', 'Take-off', 'Peak', 'Flight', 'Landing',
+    '1-2 step (two-foot)', 'Two-foot jump stop', 'One-foot take-off'];
   for (const s of sessions) {
     all.push(s.summary.grade.label, ...s.warnings);
     s.summary.plan.forEach((d) => all.push(d.day, ...d.items));
